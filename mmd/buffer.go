@@ -128,7 +128,9 @@ func (b *Buffer) ensureSpace(sz int) {
 	if cap(b.data) > need {
 		return
 	}
-	b.doubleCapacity()
+	for cap(b.data) <= need {
+		b.doubleCapacity()
+	}
 }
 
 func (b *Buffer) doubleCapacity() {
