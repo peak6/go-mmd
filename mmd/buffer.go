@@ -128,7 +128,17 @@ func (b *Buffer) ensureSpace(sz int) {
 	if cap(b.data) > need {
 		return
 	}
-	copy(make([]byte, cap(b.data)+sz), b.data)
+	b.doubleCapacity()
+}
+
+func (b *Buffer) doubleCapacity() {
+	newCapacity := cap(b.data) * 2
+	if newCapacity == 0 {
+		newCapacity = 1
+	}
+	tmp := make([]byte, newCapacity)
+	copy(tmp, b.data)
+	b.data = tmp
 }
 
 func (b *Buffer) ReadVaruint() (uint, error) {
