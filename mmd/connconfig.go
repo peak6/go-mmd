@@ -56,7 +56,7 @@ func _create_connection(cfg *ConnConfig) (Conn, error) {
 		mmdc = createConnection(cfg)
 	}
 
-	err := mmdc.createSocketConnection(false)
+	err := mmdc.createSocketConnection(false, true)
 	if err != nil {
 		return nil, err
 	}
