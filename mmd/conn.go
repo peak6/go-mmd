@@ -262,15 +262,14 @@ func (c *ConnImpl) createSocketConnection(isRetryConnection bool, isCompositeCon
 			tcpConn.SetReadBuffer(c.config.ReadSz)
 			c.socket = tcpConn
 
-			shouldCallOnConnect := !isRetryConnection || !isCompositeConn
-			return c.onSocketConnection(shouldCallOnConnect)
+			return c.onSocketConnection(isRetryConnection, isCompositeConn)
 		}
 
 		return err
 	}
 }
 
-func (c *ConnImpl) onSocketConnection(shouldCallConnect bool) error {
+func (c *ConnImpl) onSocketConnection(isRetryConnection bool, isCompositeConn bool) error {
 	//either write or read the handshake
 	if c.config.WriteHandshake {
 		err := c.handshake()
@@ -290,7 +289,8 @@ func (c *ConnImpl) onSocketConnection(shouldCallConnect bool) error {
 		c.Call("$mmd", map[string]interface{}{"extraTheirTags": c.config.ExtraTheirTags})
 	}
 
-	if c.config.OnConnect != nil && shouldCallConnect {
+	shouldCallOnConnect := isRetryConnection || !isCompositeConn
+	if c.config.OnConnect != nil && shouldCallOnConnect {
 		return c.config.OnConnect(c)
 	}
 
