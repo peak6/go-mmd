@@ -28,7 +28,7 @@ type Conn interface {
 
 	String() string
 
-	createSocketConnection(isRetryConnection bool, isCompositeConn bool) error
+	createSocketConnection(isRetryConnection bool, notifyOnConnect bool) error
 	close() error
 }
 
@@ -236,7 +236,7 @@ func (c *ConnImpl) close() error {
 	return nil
 }
 
-func (c *ConnImpl) createSocketConnection(isRetryConnection bool, isCompositeConn bool) error {
+func (c *ConnImpl) createSocketConnection(isRetryConnection bool, notifyOnConnect bool) error {
 	if isRetryConnection && c.config.ReconnectDelay > 0 {
 		log.Printf("Sleeping for %.2f seconds before trying next connection\n", c.config.ReconnectDelay.Seconds())
 		time.Sleep(c.config.ReconnectDelay)
@@ -262,14 +262,14 @@ func (c *ConnImpl) createSocketConnection(isRetryConnection bool, isCompositeCon
 			tcpConn.SetReadBuffer(c.config.ReadSz)
 			c.socket = tcpConn
 
-			return c.onSocketConnection(isRetryConnection, isCompositeConn)
+			return c.onSocketConnection(notifyOnConnect)
 		}
 
 		return err
 	}
 }
 
-func (c *ConnImpl) onSocketConnection(isRetryConnection bool, isCompositeConn bool) error {
+func (c *ConnImpl) onSocketConnection(notifyOnConnect bool) error {
 	//either write or read the handshake
 	if c.config.WriteHandshake {
 		err := c.handshake()
@@ -289,8 +289,7 @@ func (c *ConnImpl) onSocketConnection(isRetryConnection bool, isCompositeConn bo
 		c.Call("$mmd", map[string]interface{}{"extraTheirTags": c.config.ExtraTheirTags})
 	}
 
-	shouldCallOnConnect := isRetryConnection || !isCompositeConn
-	if c.config.OnConnect != nil && shouldCallOnConnect {
+	if c.config.OnConnect != nil && notifyOnConnect {
 		return c.config.OnConnect(c)
 	}
 
