@@ -131,8 +131,8 @@ func (c *CompositeConn) registerDirectService(service string, fn ServiceFunc) er
 	return nil
 }
 
-func (c *CompositeConn) createSocketConnection(isRetryConnection bool, isCompositeConn bool) error {
-	return c.mmdConn.createSocketConnection(isRetryConnection, isCompositeConn)
+func (c *CompositeConn) createSocketConnection(isRetryConnection bool, notifyOnConnect bool) error {
+	return c.mmdConn.createSocketConnection(isRetryConnection, notifyOnConnect)
 }
 
 func (c *CompositeConn) close() (err error) {
@@ -229,7 +229,7 @@ func (c *CompositeConn) createAndInitDirectConnection(service string) (*ConnImpl
 
 	conn := createConnection(&newConfig)
 
-	err = conn.createSocketConnection(false, true)
+	err = conn.createSocketConnection(false, false)
 	if err != nil {
 		return nil, err
 	}
