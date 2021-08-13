@@ -71,7 +71,7 @@ func (s *Server) handleConnection(tcpConn *net.TCPConn) (err error) {
 	mmdConn := createConnectionForTcpConn(serverConfig, tcpConn)
 
 	mmdConn.services[s.serviceName] = s.serviceFunc
-	return mmdConn.onSocketConnection(false, true)
+	return mmdConn.onSocketConnection(true)
 }
 
 func createServerSideConnCfg(clientConfig *ConnConfig) *ConnConfig {
