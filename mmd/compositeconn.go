@@ -238,7 +238,7 @@ func (c *CompositeConn) createAndInitDirectConnection(service string) (*ConnImpl
 }
 
 var env = computeEnv()
-var nameserverHost = getEnv("NAMESERVER_HOST", env+".k8s.peak6.net")
+var nameserverHost = getEnv("NAMESERVER_HOST", "istio-dns."+env+".k8s.peak6.net")
 var istioIngressHost = getEnv("ISTIO_INGRESS_HOST", env+".istioingress.peak6.net")
 var _, isInK8s = os.LookupEnv("KUBERNETES_SERVICE_HOST")
 var useIstioIngress = getEnvBool("USE_ISTIO_INGRESS", !isInK8s)
