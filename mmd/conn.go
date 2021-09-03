@@ -237,6 +237,8 @@ func (c *ConnImpl) close() error {
 }
 
 func (c *ConnImpl) createSocketConnection(isRetryConnection bool, notifyOnConnect bool) error {
+	c.socketLock.Lock()
+
 	if isRetryConnection && c.config.ReconnectDelay > 0 {
 		log.Printf("Sleeping for %.2f seconds before trying next connection\n", c.config.ReconnectDelay.Seconds())
 		time.Sleep(c.config.ReconnectDelay)
@@ -261,10 +263,12 @@ func (c *ConnImpl) createSocketConnection(isRetryConnection bool, notifyOnConnec
 			tcpConn.SetWriteBuffer(c.config.WriteSz)
 			tcpConn.SetReadBuffer(c.config.ReadSz)
 			c.socket = tcpConn
+			c.socketLock.Unlock()
 
 			return c.onSocketConnection(notifyOnConnect)
 		}
 
+		c.socketLock.Unlock()
 		return err
 	}
 }
