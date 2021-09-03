@@ -268,6 +268,7 @@ func (c *ConnImpl) createSocketConnection(isRetryConnection bool, notifyOnConnec
 			return c.onSocketConnection(notifyOnConnect)
 		}
 
+		c.socketLock.Unlock()
 		return err
 	}
 }
