@@ -143,7 +143,9 @@ func (c *CompositeConn) close() (err error) {
 	defer c.mu.Unlock()
 
 	for service, conn := range c.conns {
-		err = conn.close()
+		conn.cleanupReader()
+		conn.cleanupSocket()
+		err := conn.close()
 		if err != nil {
 			log.Println("Error closing direct connection", err)
 		}
@@ -166,15 +168,16 @@ func (c *CompositeConn) close() (err error) {
 }
 
 func (c *CompositeConn) onDisconnect() {
-	if !c.stopping.Load() {
-		c.stopping.Toggle()
-
+	if c.stopping.CAS(false, true) {
 		log.Println("Closing and reconnect composite connection")
 		c.close()
 		if c.cfg.AutoRetry {
+			start := time.Now()
 			c.createSocketConnection(true, true)
+			elapsed := time.Since(start)
+			log.Println("Socket reset. Connected to mmd after :", elapsed)
 		}
-		c.stopping.Toggle()
+		c.stopping.Store(false)
 	}
 }
 
