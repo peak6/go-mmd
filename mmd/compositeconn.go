@@ -132,6 +132,7 @@ func (c *CompositeConn) registerDirectService(service string, fn ServiceFunc) er
 }
 
 func (c *CompositeConn) createSocketConnection(isRetryConnection bool, notifyOnConnect bool) error {
+	c.mmdConn.config.OnDisconnect = c.onDisconnect
 	return c.mmdConn.createSocketConnection(isRetryConnection, notifyOnConnect)
 }
 
