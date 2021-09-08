@@ -15,6 +15,7 @@ const DefaultRetryInterval = 5 * time.Second
 const LocalhostUrl = "localhost:9999"
 
 type OnConnection func(Conn) error
+type OnDisconnect func()
 
 type Conn interface {
 	Subscribe(service string, body interface{}) (*Chan, error)
@@ -237,8 +238,6 @@ func (c *ConnImpl) close() error {
 }
 
 func (c *ConnImpl) createSocketConnection(isRetryConnection bool, notifyOnConnect bool) error {
-	c.socketLock.Lock()
-
 	if isRetryConnection && c.config.ReconnectDelay > 0 {
 		log.Printf("Sleeping for %.2f seconds before trying next connection\n", c.config.ReconnectDelay.Seconds())
 		time.Sleep(c.config.ReconnectDelay)
@@ -263,12 +262,10 @@ func (c *ConnImpl) createSocketConnection(isRetryConnection bool, notifyOnConnec
 			tcpConn.SetWriteBuffer(c.config.WriteSz)
 			tcpConn.SetReadBuffer(c.config.ReadSz)
 			c.socket = tcpConn
-			c.socketLock.Unlock()
 
 			return c.onSocketConnection(notifyOnConnect)
 		}
 
-		c.socketLock.Unlock()
 		return err
 	}
 }
@@ -378,7 +375,11 @@ func (c *ConnImpl) reader() {
 	buff := make([]byte, 256)
 	defer func() {
 		log.Println("exiting reader loop")
-		c.onDisconnect()
+		if c.config.OnDisconnect != nil {
+			c.config.OnDisconnect()
+		} else {
+			c.onDisconnect()
+		}
 	}()
 
 	for {
