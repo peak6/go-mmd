@@ -2,6 +2,7 @@ package mmd
 
 import (
 	"fmt"
+	"go.uber.org/atomic"
 	"os"
 	"path/filepath"
 	"strings"
@@ -68,10 +69,11 @@ func _create_connection(cfg *ConnConfig) (Conn, error) {
 func createCompositeConnection(cfg *ConnConfig) *CompositeConn {
 	compositeCfg := *cfg
 	result := &CompositeConn{
-		conns:   make(map[string]*ConnImpl),
-		mmdConn: createConnection(&compositeCfg),
-		cfg:     &compositeCfg,
-		servers: make([]*Server, 0),
+		conns:    make(map[string]*ConnImpl),
+		mmdConn:  createConnection(&compositeCfg),
+		cfg:      &compositeCfg,
+		servers:  make([]*Server, 0),
+		stopping: atomic.NewBool(false),
 	}
 	if (cfg.OnConnect != nil) {
 		compositeCfg.OnConnect = func(Conn) error {
