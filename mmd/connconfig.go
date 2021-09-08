@@ -20,6 +20,7 @@ type ConnConfig struct {
 	ReconnectInterval time.Duration
 	ReconnectDelay    time.Duration
 	OnConnect         OnConnection
+	OnDisconnect      OnDisconnect
 	ExtraMyTags       []string
 	ExtraTheirTags    []string
 	ConnTimeout       int
