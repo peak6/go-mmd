@@ -3,6 +3,7 @@ package mmd
 import (
 	"context"
 	"fmt"
+	"go.uber.org/atomic"
 	"log"
 	"net"
 	"os"
@@ -21,6 +22,7 @@ type CompositeConn struct {
 	mu          sync.RWMutex
 	callTimeout time.Duration
 	servers     []*Server
+	stopping    *atomic.Bool
 }
 
 func (c *CompositeConn) Subscribe(service string, body interface{}) (*Chan, error) {
@@ -132,6 +134,7 @@ func (c *CompositeConn) registerDirectService(service string, fn ServiceFunc) er
 }
 
 func (c *CompositeConn) createSocketConnection(isRetryConnection bool, notifyOnConnect bool) error {
+	c.mmdConn.config.OnDisconnect = c.onDisconnect
 	return c.mmdConn.createSocketConnection(isRetryConnection, notifyOnConnect)
 }
 
@@ -139,11 +142,14 @@ func (c *CompositeConn) close() (err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	for _, conn := range c.conns {
-		err = conn.close()
+	for service, conn := range c.conns {
+		conn.cleanupReader()
+		conn.cleanupSocket()
+		err := conn.close()
 		if err != nil {
 			log.Println("Error closing direct connection", err)
 		}
+		delete(c.conns, service)
 	}
 
 	err = c.mmdConn.close()
@@ -159,6 +165,20 @@ func (c *CompositeConn) close() (err error) {
 	}
 
 	return
+}
+
+func (c *CompositeConn) onDisconnect() {
+	if c.stopping.CAS(false, true) {
+		log.Println("Closing and reconnect composite connection")
+		c.close()
+		if c.cfg.AutoRetry {
+			start := time.Now()
+			c.createSocketConnection(true, true)
+			elapsed := time.Since(start)
+			log.Println("Socket reset. Connected to mmd after :", elapsed)
+		}
+		c.stopping.Store(false)
+	}
 }
 
 func (c *CompositeConn) getOrCreateConnection(service string) (*ConnImpl, error) {
@@ -226,6 +246,7 @@ func (c *CompositeConn) createAndInitDirectConnection(service string) (*ConnImpl
 	newConfig.Url = newUrl
 
 	newConfig.ConnTimeout = DIRECT_CONNECTION_TIMEOUT_SECONDS
+	newConfig.OnDisconnect = c.onDisconnect
 
 	conn := createConnection(&newConfig)
 
@@ -238,7 +259,7 @@ func (c *CompositeConn) createAndInitDirectConnection(service string) (*ConnImpl
 }
 
 var env = computeEnv()
-var nameserverHost = getEnv("NAMESERVER_HOST", env+".k8s.peak6.net")
+var nameserverHost = getEnv("NAMESERVER_HOST", "istio-dns."+env+".k8s.peak6.net")
 var istioIngressHost = getEnv("ISTIO_INGRESS_HOST", env+".istioingress.peak6.net")
 var _, isInK8s = os.LookupEnv("KUBERNETES_SERVICE_HOST")
 var useIstioIngress = getEnvBool("USE_ISTIO_INGRESS", !isInK8s)
