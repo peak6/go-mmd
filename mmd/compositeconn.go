@@ -3,6 +3,7 @@ package mmd
 import (
 	"context"
 	"fmt"
+	"go.uber.org/atomic"
 	"log"
 	"net"
 	"os"
@@ -21,6 +22,7 @@ type CompositeConn struct {
 	mu          sync.RWMutex
 	callTimeout time.Duration
 	servers     []*Server
+	stopping    *atomic.Bool
 }
 
 func (c *CompositeConn) Subscribe(service string, body interface{}) (*Chan, error) {
@@ -164,10 +166,15 @@ func (c *CompositeConn) close() (err error) {
 }
 
 func (c *CompositeConn) onDisconnect() {
-	log.Println("Closing and reconnect composite connection")
-	c.close()
-	if c.cfg.AutoRetry {
-		c.createSocketConnection(true, true)
+	if !c.stopping.Load() {
+		c.stopping.Toggle()
+
+		log.Println("Closing and reconnect composite connection")
+		c.close()
+		if c.cfg.AutoRetry {
+			c.createSocketConnection(true, true)
+		}
+		c.stopping.Toggle()
 	}
 }
 
