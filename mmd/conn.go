@@ -228,6 +228,9 @@ func (c *ConnImpl) reconnect() {
 }
 
 func (c *ConnImpl) close() error {
+	c.socketLock.Lock()
+	defer c.socketLock.Unlock()
+
 	if c.socket != nil {
 		err := c.socket.Close()
 		return err
