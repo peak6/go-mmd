@@ -173,13 +173,14 @@ func (c *CompositeConn) onDisconnect() {
 	if c.stopping.CAS(false, true) {
 		log.Println("Closing and reconnect composite connection")
 		c.close()
+		c.stopping.Store(false)
+
 		if c.cfg.AutoRetry {
 			start := time.Now()
 			c.createSocketConnection(true, true)
 			elapsed := time.Since(start)
 			log.Println("Socket reset. Connected to mmd after :", elapsed)
 		}
-		c.stopping.Store(false)
 	}
 }
 
@@ -333,7 +334,7 @@ func getServiceUrl(service string) (string, error) {
 
 	port := addrs[0].Port
 
-	log.Printf("Resolved port %d", port)
+	log.Printf("Resolved host %s port %d", host, port)
 
 	return fmt.Sprintf("%s:%d", host, port), nil
 }
