@@ -152,6 +152,8 @@ func (c *CompositeConn) close() (err error) {
 		delete(c.conns, service)
 	}
 
+	c.mmdConn.cleanupSocket()
+	c.mmdConn.cleanupReader()
 	err = c.mmdConn.close()
 	if err != nil {
 		log.Println("Error closing mmd connection", err)
