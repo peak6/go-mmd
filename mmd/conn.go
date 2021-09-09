@@ -190,8 +190,14 @@ func (c *ConnImpl) startReader() {
 
 func (c *ConnImpl) cleanupReader() {
 	log.Println("Cleaning up reader")
-	defer c.dispatchLock.Unlock()
+	defer func() {
+		c.dispatchLock.Unlock()
+		c.socketLock.Unlock()
+	}()
+
+	c.socketLock.Lock()
 	c.socket.CloseRead()
+
 	c.dispatchLock.Lock()
 	for k, v := range c.dispatch {
 		log.Println("Auto-closing channel", k)
@@ -201,6 +207,8 @@ func (c *ConnImpl) cleanupReader() {
 }
 
 func (c *ConnImpl) cleanupSocket() {
+	defer c.socketLock.Unlock()
+	c.socketLock.Lock()
 	c.socket.CloseWrite()
 }
 
