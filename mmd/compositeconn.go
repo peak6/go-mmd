@@ -23,6 +23,7 @@ type CompositeConn struct {
 	callTimeout time.Duration
 	servers     []*Server
 	stopping    *atomic.Bool
+	wg          sync.WaitGroup
 }
 
 func (c *CompositeConn) Subscribe(service string, body interface{}) (*Chan, error) {
@@ -143,6 +144,7 @@ func (c *CompositeConn) close() (err error) {
 	defer c.mu.Unlock()
 
 	for service, conn := range c.conns {
+		c.wg.Add(1)
 		conn.cleanupReader()
 		conn.cleanupSocket()
 		err := conn.close()
@@ -173,14 +175,16 @@ func (c *CompositeConn) onDisconnect() {
 	if c.stopping.CAS(false, true) {
 		log.Println("Closing and reconnect composite connection")
 		c.close()
+		c.wg.Wait()
 		c.stopping.Store(false)
-
 		if c.cfg.AutoRetry {
 			start := time.Now()
 			c.createSocketConnection(true, true)
 			elapsed := time.Since(start)
 			log.Println("Socket reset. Connected to mmd after :", elapsed)
 		}
+	} else {
+		c.wg.Done()
 	}
 }
 
