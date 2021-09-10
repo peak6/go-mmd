@@ -22,8 +22,7 @@ type CompositeConn struct {
 	mu          sync.RWMutex
 	callTimeout time.Duration
 	servers     []*Server
-	stopping    *atomic.Bool
-	wg          sync.WaitGroup
+	stopCounter *atomic.Int32
 }
 
 func (c *CompositeConn) Subscribe(service string, body interface{}) (*Chan, error) {
@@ -136,6 +135,7 @@ func (c *CompositeConn) registerDirectService(service string, fn ServiceFunc) er
 
 func (c *CompositeConn) createSocketConnection(isRetryConnection bool, notifyOnConnect bool) error {
 	c.mmdConn.config.OnDisconnect = c.onDisconnect
+	c.mmdConn.config.Counter = c.stopCounter.Load()
 	return c.mmdConn.createSocketConnection(isRetryConnection, notifyOnConnect)
 }
 
@@ -144,22 +144,15 @@ func (c *CompositeConn) close() (err error) {
 	defer c.mu.Unlock()
 
 	for service, conn := range c.conns {
-		c.wg.Add(1)
 		conn.cleanupReader()
 		conn.cleanupSocket()
-		err := conn.close()
-		if err != nil {
-			log.Println("Error closing direct connection", err)
-		}
+		conn.close() // error expected here since it could be a disconnected service
 		delete(c.conns, service)
 	}
 
 	c.mmdConn.cleanupSocket()
 	c.mmdConn.cleanupReader()
-	err = c.mmdConn.close()
-	if err != nil {
-		log.Println("Error closing mmd connection", err)
-	}
+	c.mmdConn.close()
 
 	for _, server := range c.servers {
 		err = server.stop()
@@ -171,38 +164,27 @@ func (c *CompositeConn) close() (err error) {
 	return
 }
 
-func (c *CompositeConn) onDisconnect() {
-	if c.stopping.CAS(false, true) {
-		log.Println("Closing and reconnect composite connection")
+func (c *CompositeConn) onDisconnect(connCounter int32) {
+	if c.stopCounter.CAS(connCounter, connCounter+1) {
+		log.Println("Closing and reconnect composite connection", c.stopCounter.Load(), connCounter, c.String())
 		c.close()
-		c.wg.Wait()
-		c.stopping.Store(false)
+		time.Sleep(c.cfg.ReconnectInterval)
+
 		if c.cfg.AutoRetry {
-			start := time.Now()
 			c.createSocketConnection(true, true)
-			elapsed := time.Since(start)
-			log.Println("Socket reset. Connected to mmd after :", elapsed)
+			return
 		}
-	} else {
-		c.wg.Done()
 	}
 }
 
 func (c *CompositeConn) getOrCreateConnection(service string) (*ConnImpl, error) {
-	log.Println("get or create connection " + service)
-
 	if conn := c.getConnection(service); conn != nil {
-		log.Println("Found existing connection for " + service)
 		return conn, nil
 	} else {
-		log.Println("No existing connection found for " + service + ". Creating one")
-
 		accessMethod, err := c.getAccessMethod(service)
 		if err != nil {
 			return nil, err
 		}
-		log.Printf("Access method for %s: %d", service, accessMethod)
-
 		return c.createConnection(service, accessMethod)
 	}
 }
@@ -242,18 +224,18 @@ func (c *CompositeConn) createConnection(service string, serviceType mmdAccessMe
 const DIRECT_CONNECTION_TIMEOUT_SECONDS = 5
 
 func (c *CompositeConn) createAndInitDirectConnection(service string) (*ConnImpl, error) {
-	log.Println("Creating new direct connection for " + service)
+	log.Println("Creating new direct connection for ", service)
 
 	newConfig := *(c.cfg)
 	newUrl, err := getServiceUrl(service)
 	if err != nil {
 		return nil, err
 	}
-	log.Println("Using service url " + newUrl + " for service " + service)
 	newConfig.Url = newUrl
 
 	newConfig.ConnTimeout = DIRECT_CONNECTION_TIMEOUT_SECONDS
 	newConfig.OnDisconnect = c.onDisconnect
+	newConfig.Counter = c.stopCounter.Load()
 
 	conn := createConnection(&newConfig)
 
@@ -297,8 +279,6 @@ func getServiceUrl(service string) (string, error) {
 		return envVal, nil
 	}
 
-	log.Println("Getting service url for " + service)
-
 	k8sServiceName := strings.ReplaceAll(service, ".", "-")
 	k8sFqdn := k8sServiceName + ".default.svc.cluster.local"
 
@@ -327,19 +307,13 @@ func getServiceUrl(service string) (string, error) {
 	var host string
 	if !useIstioIngress {
 		host = addrs[0].Target
-		log.Println("Not using istio ingress, using resolved address as host: " + host)
-
-		host = addrs[0].Target
 	} else {
-		log.Println("Using istio ingress as host: " + istioIngressHost)
-
 		host = istioIngressHost
 	}
 
 	port := addrs[0].Port
 
 	log.Printf("Resolved host %s port %d", host, port)
-
 	return fmt.Sprintf("%s:%d", host, port), nil
 }
 
@@ -356,8 +330,6 @@ const serviceDiscoveryServiceName = "mmd.istio.service.discovery"
 var preferMmd = getEnvBool("PREFER_MMD_CONNECTION", false)
 
 func (c *CompositeConn) getAccessMethod(service string) (mmdAccessMethod, error) {
-	log.Println("Looking up service type for service " + service)
-
 	re := regexp.MustCompile("[.\\\\-]")
 	listenPortEnvVar := re.ReplaceAllString(strings.ToUpper(service), "_") + "_ACCESS_METHOD"
 	envVal, ok := os.LookupEnv(listenPortEnvVar)
