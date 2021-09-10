@@ -166,7 +166,7 @@ func (c *CompositeConn) close() (err error) {
 
 func (c *CompositeConn) onDisconnect(connCounter int32) {
 	if c.stopCounter.CAS(connCounter, connCounter+1) {
-		log.Println("Closing and reconnect composite connection", c.stopCounter.Load(), connCounter, c.String())
+		log.Println("Closing and reconnect composite connection", c.String())
 		c.close()
 		time.Sleep(c.cfg.ReconnectInterval)
 
@@ -224,7 +224,7 @@ func (c *CompositeConn) createConnection(service string, serviceType mmdAccessMe
 const DIRECT_CONNECTION_TIMEOUT_SECONDS = 5
 
 func (c *CompositeConn) createAndInitDirectConnection(service string) (*ConnImpl, error) {
-	log.Println("Creating new direct connection for ", service)
+	log.Println("Creating new direct connection for " + service)
 
 	newConfig := *(c.cfg)
 	newUrl, err := getServiceUrl(service)
