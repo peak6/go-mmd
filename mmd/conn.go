@@ -15,7 +15,7 @@ const DefaultRetryInterval = 5 * time.Second
 const LocalhostUrl = "localhost:9999"
 
 type OnConnection func(Conn) error
-type OnDisconnect func()
+type OnDisconnect func(int32)
 
 type Conn interface {
 	Subscribe(service string, body interface{}) (*Chan, error)
@@ -189,15 +189,8 @@ func (c *ConnImpl) startReader() {
 }
 
 func (c *ConnImpl) cleanupReader() {
-	log.Println("Cleaning up reader")
-	defer func() {
-		c.dispatchLock.Unlock()
-		c.socketLock.Unlock()
-	}()
-
-	c.socketLock.Lock()
+	defer c.dispatchLock.Unlock()
 	c.socket.CloseRead()
-
 	c.dispatchLock.Lock()
 	for k, v := range c.dispatch {
 		log.Println("Auto-closing channel", k)
@@ -207,8 +200,6 @@ func (c *ConnImpl) cleanupReader() {
 }
 
 func (c *ConnImpl) cleanupSocket() {
-	defer c.socketLock.Unlock()
-	c.socketLock.Lock()
 	c.socket.CloseWrite()
 }
 
@@ -244,7 +235,7 @@ func (c *ConnImpl) close() error {
 		return err
 	}
 
-	log.Println("Cannot close a nil socket")
+	c.socket = nil
 	return nil
 }
 
@@ -309,6 +300,7 @@ func (c *ConnImpl) onSocketConnection(notifyOnConnect bool) error {
 }
 
 func (c *ConnImpl) onDisconnect() {
+	log.Println("exited reader loop and disconnecting")
 	c.cleanupReader()
 	c.cleanupSocket()
 	if c.config.AutoRetry {
@@ -385,9 +377,8 @@ func (c *ConnImpl) reader() {
 	fszb := make([]byte, 4)
 	buff := make([]byte, 256)
 	defer func() {
-		log.Println("exiting reader loop")
 		if c.config.OnDisconnect != nil {
-			c.config.OnDisconnect()
+			c.config.OnDisconnect(c.config.Counter)
 		} else {
 			c.onDisconnect()
 		}
