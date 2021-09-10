@@ -16,6 +16,7 @@ type ConnConfig struct {
 	Url               string
 	ReadSz            int
 	WriteSz           int
+	Counter           int32
 	AppName           string
 	AutoRetry         bool
 	ReconnectInterval time.Duration
@@ -69,11 +70,11 @@ func _create_connection(cfg *ConnConfig) (Conn, error) {
 func createCompositeConnection(cfg *ConnConfig) *CompositeConn {
 	compositeCfg := *cfg
 	result := &CompositeConn{
-		conns:    make(map[string]*ConnImpl),
-		mmdConn:  createConnection(&compositeCfg),
-		cfg:      &compositeCfg,
-		servers:  make([]*Server, 0),
-		stopping: atomic.NewBool(false),
+		conns:       make(map[string]*ConnImpl),
+		mmdConn:     createConnection(&compositeCfg),
+		cfg:         &compositeCfg,
+		servers:     make([]*Server, 0),
+		stopCounter: atomic.NewInt32(0),
 	}
 	if (cfg.OnConnect != nil) {
 		compositeCfg.OnConnect = func(Conn) error {
