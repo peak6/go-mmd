@@ -166,13 +166,18 @@ func (c *CompositeConn) close() (err error) {
 
 func (c *CompositeConn) onDisconnect(connCounter int32) {
 	if c.stopCounter.CAS(connCounter, connCounter+1) {
-		log.Println("Closing and reconnect composite connection", connCounter, c.stopCounter.Load())
-		c.close()
-		time.Sleep(c.cfg.ReconnectInterval)
+		for {
+			log.Println("Closing and reconnect composite connection")
+			c.close()
+			time.Sleep(c.cfg.ReconnectInterval)
 
-		if c.cfg.AutoRetry {
-			c.createSocketConnection(true, true)
-			return
+			if c.cfg.AutoRetry {
+				err := c.createSocketConnection(true, true)
+				if err == nil {
+					return
+				}
+				c.stopCounter.Add(1)
+			}
 		}
 	}
 }
@@ -235,7 +240,7 @@ func (c *CompositeConn) createAndInitDirectConnection(service string) (*ConnImpl
 
 	newConfig.ConnTimeout = DIRECT_CONNECTION_TIMEOUT_SECONDS
 	newConfig.OnDisconnect = c.onDisconnect
-	newConfig.Counter = c.stopCounter.Load()
+	newConfig.Counter = c.mmdConn.config.Counter
 
 	conn := createConnection(&newConfig)
 
