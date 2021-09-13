@@ -235,7 +235,6 @@ func (c *ConnImpl) close() error {
 
 func (c *ConnImpl) createSocketConnection(isRetryConnection bool, notifyOnConnect bool) error {
 	if isRetryConnection && c.config.ReconnectDelay > 0 {
-		log.Printf("Sleeping for %.2f seconds before trying next connection\n", c.config.ReconnectDelay.Seconds())
 		time.Sleep(c.config.ReconnectDelay)
 	}
 
@@ -244,10 +243,14 @@ func (c *ConnImpl) createSocketConnection(isRetryConnection bool, notifyOnConnec
 		dialer.Timeout = time.Second * time.Duration(c.config.ConnTimeout)
 	}
 
+	connectionFailed := false
 	for {
 		conn, err := dialer.Dial("tcp", c.config.Url)
 		if err != nil && c.config.AutoRetry {
-			log.Printf("Failed to connect, will sleep for %.2f seconds before trying again : %v\n", c.config.ReconnectInterval.Seconds(), err)
+			if !connectionFailed {
+				log.Printf("Failed to connect, will sleep for %.2f seconds before trying again : %v\n", c.config.ReconnectInterval.Seconds(), err)
+				connectionFailed = true
+			}
 			time.Sleep(c.config.ReconnectInterval)
 			continue
 		}
