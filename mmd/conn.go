@@ -57,13 +57,7 @@ func (c *ConnImpl) Subscribe(service string, body interface{}) (*Chan, error) {
 }
 
 func (c *ConnImpl) Unsubscribe(cid ChannelId, body interface{}) error {
-	ch := c.unregisterChannel(cid)
-	if ch != nil {
-		close(ch)
-	} else {
-		return fmt.Errorf("Failed close channel: %v", cid)
-	}
-
+	c.unregisterChannel(cid)
 	return c.sendChannelMsg(NewChannelClose(cid, body))
 }
 
@@ -336,21 +330,39 @@ func (c *ConnImpl) registerChannel(cid ChannelId, ch chan ChannelMsg) {
 	c.dispatchLock.Unlock()
 }
 
-func (c *ConnImpl) unregisterChannel(cid ChannelId) chan ChannelMsg {
+func (c *ConnImpl) unregisterChannel(cid ChannelId) {
 	c.dispatchLock.Lock()
 	ret, ok := c.dispatch[cid]
 	if ok {
 		delete(c.dispatch, cid)
+		close(ret)
 	}
 	c.dispatchLock.Unlock()
-	return ret
 }
 
-func (c *ConnImpl) lookupChannel(cid ChannelId) chan ChannelMsg {
+func (c *ConnImpl) unregisterChannelAndSendMsg(cid ChannelId, msg ChannelMsg) {
+	c.dispatchLock.Lock()
+	ret, ok := c.dispatch[cid]
+	if ok {
+		delete(c.dispatch, cid)
+		ret <- msg
+		close(ret)
+	} else {
+		fmt.Println("Unknown channel: %v discarding message", cid)
+	}
+	c.dispatchLock.Unlock()
+}
+
+
+func (c *ConnImpl) lookupChannelAndSendMsg(cid ChannelId, msg ChannelMsg) {
 	c.dispatchLock.RLock()
-	ret := c.dispatch[cid]
+	ret, ok := c.dispatch[cid]
+	if ok {
+		ret <- msg
+	} else {
+		fmt.Println("Unknown channel: %v discarding message", cid)
+	}
 	c.dispatchLock.RUnlock()
-	return ret
 }
 
 func (c *ConnImpl) writeOnSocket(data []byte) error {
@@ -448,20 +460,9 @@ func (c *ConnImpl) dispatchMessage(m interface{}) {
 	switch msg := m.(type) {
 	case ChannelMsg:
 		if msg.IsClose {
-			ch := c.unregisterChannel(msg.Channel)
-			if ch != nil {
-				ch <- msg
-				close(ch)
-			} else {
-				log.Println("Unknown channel:", msg.Channel, "discarding message")
-			}
+			c.unregisterChannelAndSendMsg(msg.Channel, msg)
 		} else {
-			ch := c.lookupChannel(msg.Channel)
-			if ch != nil {
-				ch <- msg
-			} else {
-				log.Println("Unknown channel:", msg.Channel, "discarding message")
-			}
+			c.lookupChannelAndSendMsg(msg.Channel, msg)
 		}
 	case ChannelCreate:
 		fn, ok := c.services[msg.Service]
