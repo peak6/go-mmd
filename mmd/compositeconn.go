@@ -166,7 +166,7 @@ func (c *CompositeConn) close() (err error) {
 
 func (c *CompositeConn) onDisconnect(connCounter int32) {
 	if c.stopCounter.CAS(connCounter, connCounter+1) {
-		log.Println("Closing and reconnect composite connection", c.String())
+		log.Println("Closing and reconnect composite connection", connCounter, c.stopCounter.Load())
 		c.close()
 		time.Sleep(c.cfg.ReconnectInterval)
 
