@@ -219,7 +219,6 @@ func (c *CompositeConn) createConnection(service string, serviceType mmdAccessMe
 		if err != nil {
 			return nil, err
 		}
-		log.Println("Successfully initialized direct connection for service " + service)
 	}
 
 	c.conns[service] = conn
@@ -280,7 +279,6 @@ func getServiceUrl(service string) (string, error) {
 	listenPortEnvVar := serviceToEnvVar.ReplaceAllString(strings.ToUpper(service), "_") + "_URL"
 	envVal, ok := os.LookupEnv(listenPortEnvVar)
 	if ok {
-		log.Println("Found env override for service url for service " + service + ": " + envVal)
 		return envVal, nil
 	}
 
@@ -289,8 +287,6 @@ func getServiceUrl(service string) (string, error) {
 
 	var resolver *net.Resolver
 	if useIstioIngress {
-		log.Println("Using istio ingress, using custom resolver with configured nameserver " + nameserverHost + " for DNS SRV lookup")
-
 		resolver = &net.Resolver{
 			PreferGo: true,
 			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
@@ -299,8 +295,6 @@ func getServiceUrl(service string) (string, error) {
 			},
 		}
 	} else {
-		log.Println("Not using istio ingress - using default reachable nameserver for DNS SRV lookup")
-
 		resolver = net.DefaultResolver
 	}
 
