@@ -166,17 +166,22 @@ func (c *CompositeConn) close() (err error) {
 
 func (c *CompositeConn) onDisconnect(connCounter int32) {
 	if c.stopCounter.CAS(connCounter, connCounter+1) {
+		logReconnect := true
 		for {
-			log.Println("Closing and reconnect composite connection")
+			if logReconnect {
+				log.Println("Closing and reconnect composite connection")
+				logReconnect = false
+			}
 			c.close()
 			time.Sleep(c.cfg.ReconnectInterval)
 
 			if c.cfg.AutoRetry {
 				err := c.createSocketConnection(true, true)
-				if err == nil {
+				if err == nil || !c.stopCounter.CAS(connCounter+1, connCounter+2) {
+					// check counter to make sure there is no other process has already exited
+					// cannot assume reconnect succeed here since TCP dial always work with k8s service
 					return
 				}
-				c.stopCounter.Add(1)
 			}
 		}
 	}
@@ -228,8 +233,6 @@ func (c *CompositeConn) createConnection(service string, serviceType mmdAccessMe
 const DIRECT_CONNECTION_TIMEOUT_SECONDS = 5
 
 func (c *CompositeConn) createAndInitDirectConnection(service string) (*ConnImpl, error) {
-	log.Println("Creating new direct connection for " + service)
-
 	newConfig := *(c.cfg)
 	newUrl, err := getServiceUrl(service)
 	if err != nil {
@@ -312,7 +315,6 @@ func getServiceUrl(service string) (string, error) {
 
 	port := addrs[0].Port
 
-	log.Printf("Resolved host %s port %d", host, port)
 	return fmt.Sprintf("%s:%d", host, port), nil
 }
 
