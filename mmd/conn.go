@@ -187,7 +187,6 @@ func (c *ConnImpl) cleanupReader() {
 	c.socket.CloseRead()
 	c.dispatchLock.Lock()
 	for k, v := range c.dispatch {
-		log.Println("Auto-closing channel", k)
 		delete(c.dispatch, k)
 		close(v)
 	}
@@ -243,13 +242,13 @@ func (c *ConnImpl) createSocketConnection(isRetryConnection bool, notifyOnConnec
 		dialer.Timeout = time.Second * time.Duration(c.config.ConnTimeout)
 	}
 
-	connectionFailed := false
+	logReconnect := true
 	for {
 		conn, err := dialer.Dial("tcp", c.config.Url)
 		if err != nil && c.config.AutoRetry {
-			if !connectionFailed {
+			if logReconnect {
 				log.Printf("Failed to connect, will sleep for %.2f seconds before trying again : %v\n", c.config.ReconnectInterval.Seconds(), err)
-				connectionFailed = true
+				logReconnect = false
 			}
 			time.Sleep(c.config.ReconnectInterval)
 			continue
@@ -428,7 +427,9 @@ func (c *ConnImpl) readFrame(fszb []byte, buff []byte) (error, *Buffer) {
 	num, err := io.ReadFull(c.socket, fszb)
 	if err != nil {
 		if err != io.EOF {
-			log.Println("Error reading frame size:", err)
+			if c.config.OnDisconnect == nil { // error expected for composite connection
+				log.Println("Error reading frame size:", err)
+			}
 		}
 		return err, nil
 	}
