@@ -16,13 +16,14 @@ import (
 )
 
 type CompositeConn struct {
-	conns       map[string]*ConnImpl
-	mmdConn     *ConnImpl
-	cfg         *ConnConfig
-	mu          sync.RWMutex
-	callTimeout time.Duration
-	servers     []*Server
-	stopCounter *atomic.Int32
+	conns            map[string]*ConnImpl
+	mmdConn          *ConnImpl
+	cfg              *ConnConfig
+	mu               sync.RWMutex
+	callTimeout      time.Duration
+	servers          []*Server
+	stopCounter      *atomic.Int32
+	lastReconnect    time.Time
 }
 
 func (c *CompositeConn) Subscribe(service string, body interface{}) (*Chan, error) {
@@ -166,11 +167,9 @@ func (c *CompositeConn) close() (err error) {
 
 func (c *CompositeConn) onDisconnect(connCounter int32) {
 	if c.stopCounter.CAS(connCounter, connCounter+1) {
-		logReconnect := true
 		for {
-			if logReconnect {
+			if c.logReconnect() {
 				log.Println("Closing and reconnect composite connection")
-				logReconnect = false
 			}
 			c.close()
 			time.Sleep(c.cfg.ReconnectInterval)
@@ -185,6 +184,14 @@ func (c *CompositeConn) onDisconnect(connCounter int32) {
 			}
 		}
 	}
+}
+
+func (c *CompositeConn) logReconnect() bool {
+	// log reconnect if there is no connection drops in double ReconnectInterval
+	now := time.Now()
+	logReconnect := now.Sub(c.lastReconnect) > (c.cfg.ReconnectInterval * 2)
+	c.lastReconnect = now
+	return logReconnect
 }
 
 func (c *CompositeConn) getOrCreateConnection(service string) (*ConnImpl, error) {
