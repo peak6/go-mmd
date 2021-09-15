@@ -169,7 +169,7 @@ func (c *CompositeConn) onDisconnect(connCounter int32) {
 	if c.stopCounter.CAS(connCounter, connCounter+1) {
 		for {
 			if c.logReconnect() {
-				log.Println("Closing and reconnect composite connection")
+				log.Println("closing and reconnecting composite connection")
 			}
 			c.close()
 			time.Sleep(c.cfg.ReconnectInterval)
