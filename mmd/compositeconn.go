@@ -136,7 +136,7 @@ func (c *CompositeConn) registerDirectService(service string, fn ServiceFunc) er
 
 func (c *CompositeConn) createSocketConnection(isRetryConnection bool, notifyOnConnect bool) error {
 	c.mmdConn.config.OnDisconnect = c.onDisconnect
-	c.mmdConn.config.Verson = c.connVersionCounter.Load()
+	c.mmdConn.config.Version = c.connVersionCounter.Load()
 	return c.mmdConn.createSocketConnection(isRetryConnection, notifyOnConnect)
 }
 
@@ -258,7 +258,7 @@ func (c *CompositeConn) createAndInitDirectConnection(service string) (*ConnImpl
 
 	newConfig.ConnTimeout = DIRECT_CONNECTION_TIMEOUT_SECONDS
 	newConfig.OnDisconnect = c.onDisconnect
-	newConfig.Verson = c.mmdConn.config.Verson
+	newConfig.Version = c.mmdConn.config.Version
 
 	conn := createConnection(&newConfig)
 
