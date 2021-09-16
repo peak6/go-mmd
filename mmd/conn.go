@@ -391,7 +391,7 @@ func (c *ConnImpl) reader() {
 	buff := make([]byte, 256)
 	defer func() {
 		if c.config.OnDisconnect != nil {
-			c.config.OnDisconnect(c.config.Verson)
+			c.config.OnDisconnect(c.config.Version)
 		} else {
 			c.onDisconnect()
 		}
