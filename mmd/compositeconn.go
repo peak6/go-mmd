@@ -3,6 +3,7 @@ package mmd
 import (
 	"context"
 	"fmt"
+	"go.uber.org/atomic"
 	"log"
 	"net"
 	"os"
@@ -15,12 +16,14 @@ import (
 )
 
 type CompositeConn struct {
-	conns       map[string]*ConnImpl
-	mmdConn     *ConnImpl
-	cfg         *ConnConfig
-	mu          sync.RWMutex
-	callTimeout time.Duration
-	servers     []*Server
+	conns              map[string]*ConnImpl
+	mmdConn            *ConnImpl
+	cfg                *ConnConfig
+	mu                 sync.RWMutex
+	callTimeout        time.Duration
+	servers            []*Server
+	connVersionCounter *atomic.Int32
+	lastReconnect      time.Time
 }
 
 func (c *CompositeConn) Subscribe(service string, body interface{}) (*Chan, error) {
@@ -132,6 +135,8 @@ func (c *CompositeConn) registerDirectService(service string, fn ServiceFunc) er
 }
 
 func (c *CompositeConn) createSocketConnection(isRetryConnection bool, notifyOnConnect bool) error {
+	c.mmdConn.config.OnDisconnect = c.onDisconnect
+	c.mmdConn.config.Verson = c.connVersionCounter.Load()
 	return c.mmdConn.createSocketConnection(isRetryConnection, notifyOnConnect)
 }
 
@@ -139,17 +144,16 @@ func (c *CompositeConn) close() (err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	for _, conn := range c.conns {
-		err = conn.close()
-		if err != nil {
-			log.Println("Error closing direct connection", err)
-		}
+	for service, conn := range c.conns {
+		conn.cleanupReader()
+		conn.cleanupSocket()
+		conn.close() // error expected here since it could be a disconnected service
+		delete(c.conns, service)
 	}
 
-	err = c.mmdConn.close()
-	if err != nil {
-		log.Println("Error closing mmd connection", err)
-	}
+	c.mmdConn.cleanupSocket()
+	c.mmdConn.cleanupReader()
+	c.mmdConn.close()
 
 	for _, server := range c.servers {
 		err = server.stop()
@@ -161,21 +165,51 @@ func (c *CompositeConn) close() (err error) {
 	return
 }
 
-func (c *CompositeConn) getOrCreateConnection(service string) (*ConnImpl, error) {
-	log.Println("get or create connection " + service)
+func (c *CompositeConn) onDisconnect(connVerson int32) {
+	/*
+	Close out all connections
+	Use counter to make sure it will only close and create new connection once when there are multiple connection drops
+	Doc Link: TODO
+	 */
+	if c.connVersionCounter.CAS(connVerson, connVerson+1) {
+		for {
+			c.close()
+			if !c.cfg.AutoRetry {
+				log.Println("closing composite connection")
+				return
+			}
 
+			if c.logReconnect() {
+				log.Println("reconnecting composite connection")
+			}
+
+			time.Sleep(c.cfg.ReconnectInterval)
+			err := c.createSocketConnection(true, true)
+			if err == nil || !c.connVersionCounter.CAS(connVerson+1, connVerson+2) {
+				// check counter to make sure there is no other process has already exited
+				// cannot assume reconnect succeed here since TCP dial always work with k8s service
+				return
+			}
+		}
+	}
+}
+
+func (c *CompositeConn) logReconnect() bool {
+	// log reconnect if there is no connection drops in double ReconnectInterval
+	now := time.Now()
+	logReconnect := now.Sub(c.lastReconnect) > (c.cfg.ReconnectInterval * 2)
+	c.lastReconnect = now
+	return logReconnect
+}
+
+func (c *CompositeConn) getOrCreateConnection(service string) (*ConnImpl, error) {
 	if conn := c.getConnection(service); conn != nil {
-		log.Println("Found existing connection for " + service)
 		return conn, nil
 	} else {
-		log.Println("No existing connection found for " + service + ". Creating one")
-
 		accessMethod, err := c.getAccessMethod(service)
 		if err != nil {
 			return nil, err
 		}
-		log.Printf("Access method for %s: %d", service, accessMethod)
-
 		return c.createConnection(service, accessMethod)
 	}
 }
@@ -205,7 +239,6 @@ func (c *CompositeConn) createConnection(service string, serviceType mmdAccessMe
 		if err != nil {
 			return nil, err
 		}
-		log.Println("Successfully initialized direct connection for service " + service)
 	}
 
 	c.conns[service] = conn
@@ -215,17 +248,16 @@ func (c *CompositeConn) createConnection(service string, serviceType mmdAccessMe
 const DIRECT_CONNECTION_TIMEOUT_SECONDS = 5
 
 func (c *CompositeConn) createAndInitDirectConnection(service string) (*ConnImpl, error) {
-	log.Println("Creating new direct connection for " + service)
-
 	newConfig := *(c.cfg)
 	newUrl, err := getServiceUrl(service)
 	if err != nil {
 		return nil, err
 	}
-	log.Println("Using service url " + newUrl + " for service " + service)
 	newConfig.Url = newUrl
 
 	newConfig.ConnTimeout = DIRECT_CONNECTION_TIMEOUT_SECONDS
+	newConfig.OnDisconnect = c.onDisconnect
+	newConfig.Verson = c.mmdConn.config.Verson
 
 	conn := createConnection(&newConfig)
 
@@ -265,19 +297,14 @@ func getServiceUrl(service string) (string, error) {
 	listenPortEnvVar := serviceToEnvVar.ReplaceAllString(strings.ToUpper(service), "_") + "_URL"
 	envVal, ok := os.LookupEnv(listenPortEnvVar)
 	if ok {
-		log.Println("Found env override for service url for service " + service + ": " + envVal)
 		return envVal, nil
 	}
-
-	log.Println("Getting service url for " + service)
 
 	k8sServiceName := strings.ReplaceAll(service, ".", "-")
 	k8sFqdn := k8sServiceName + ".default.svc.cluster.local"
 
 	var resolver *net.Resolver
 	if useIstioIngress {
-		log.Println("Using istio ingress, using custom resolver with configured nameserver " + nameserverHost + " for DNS SRV lookup")
-
 		resolver = &net.Resolver{
 			PreferGo: true,
 			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
@@ -286,8 +313,6 @@ func getServiceUrl(service string) (string, error) {
 			},
 		}
 	} else {
-		log.Println("Not using istio ingress - using default reachable nameserver for DNS SRV lookup")
-
 		resolver = net.DefaultResolver
 	}
 
@@ -299,18 +324,11 @@ func getServiceUrl(service string) (string, error) {
 	var host string
 	if !useIstioIngress {
 		host = addrs[0].Target
-		log.Println("Not using istio ingress, using resolved address as host: " + host)
-
-		host = addrs[0].Target
 	} else {
-		log.Println("Using istio ingress as host: " + istioIngressHost)
-
 		host = istioIngressHost
 	}
 
 	port := addrs[0].Port
-
-	log.Printf("Resolved port %d", port)
 
 	return fmt.Sprintf("%s:%d", host, port), nil
 }
@@ -328,8 +346,6 @@ const serviceDiscoveryServiceName = "mmd.istio.service.discovery"
 var preferMmd = getEnvBool("PREFER_MMD_CONNECTION", false)
 
 func (c *CompositeConn) getAccessMethod(service string) (mmdAccessMethod, error) {
-	log.Println("Looking up service type for service " + service)
-
 	re := regexp.MustCompile("[.\\\\-]")
 	listenPortEnvVar := re.ReplaceAllString(strings.ToUpper(service), "_") + "_ACCESS_METHOD"
 	envVal, ok := os.LookupEnv(listenPortEnvVar)

@@ -2,6 +2,7 @@ package mmd
 
 import (
 	"fmt"
+	"go.uber.org/atomic"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,11 +16,13 @@ type ConnConfig struct {
 	Url               string
 	ReadSz            int
 	WriteSz           int
+	Verson            int32
 	AppName           string
 	AutoRetry         bool
 	ReconnectInterval time.Duration
 	ReconnectDelay    time.Duration
 	OnConnect         OnConnection
+	OnDisconnect      OnDisconnect
 	ExtraMyTags       []string
 	ExtraTheirTags    []string
 	ConnTimeout       int
@@ -67,10 +70,12 @@ func _create_connection(cfg *ConnConfig) (Conn, error) {
 func createCompositeConnection(cfg *ConnConfig) *CompositeConn {
 	compositeCfg := *cfg
 	result := &CompositeConn{
-		conns:   make(map[string]*ConnImpl),
-		mmdConn: createConnection(&compositeCfg),
-		cfg:     &compositeCfg,
-		servers: make([]*Server, 0),
+		conns:               make(map[string]*ConnImpl),
+		mmdConn:             createConnection(&compositeCfg),
+		cfg:                 &compositeCfg,
+		servers:             make([]*Server, 0),
+		connVersionCounter:  atomic.NewInt32(0),
+		lastReconnect:       time.Now(),
 	}
 	if (cfg.OnConnect != nil) {
 		compositeCfg.OnConnect = func(Conn) error {

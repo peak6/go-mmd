@@ -15,6 +15,7 @@ const DefaultRetryInterval = 5 * time.Second
 const LocalhostUrl = "localhost:9999"
 
 type OnConnection func(Conn) error
+type OnDisconnect func(int32)
 
 type Conn interface {
 	Subscribe(service string, body interface{}) (*Chan, error)
@@ -56,13 +57,7 @@ func (c *ConnImpl) Subscribe(service string, body interface{}) (*Chan, error) {
 }
 
 func (c *ConnImpl) Unsubscribe(cid ChannelId, body interface{}) error {
-	ch := c.unregisterChannel(cid)
-	if ch != nil {
-		close(ch)
-	} else {
-		return fmt.Errorf("Failed close channel: %v", cid)
-	}
-
+	c.unregisterChannel(cid)
 	return c.sendChannelMsg(NewChannelClose(cid, body))
 }
 
@@ -188,12 +183,10 @@ func (c *ConnImpl) startReader() {
 }
 
 func (c *ConnImpl) cleanupReader() {
-	log.Println("Cleaning up reader")
 	defer c.dispatchLock.Unlock()
 	c.socket.CloseRead()
 	c.dispatchLock.Lock()
 	for k, v := range c.dispatch {
-		log.Println("Auto-closing channel", k)
 		delete(c.dispatch, k)
 		close(v)
 	}
@@ -227,18 +220,19 @@ func (c *ConnImpl) reconnect() {
 }
 
 func (c *ConnImpl) close() error {
+	c.socketLock.Lock()
+	defer c.socketLock.Unlock()
+
 	if c.socket != nil {
 		err := c.socket.Close()
 		return err
 	}
 
-	log.Println("Cannot close a nil socket")
 	return nil
 }
 
 func (c *ConnImpl) createSocketConnection(isRetryConnection bool, notifyOnConnect bool) error {
 	if isRetryConnection && c.config.ReconnectDelay > 0 {
-		log.Printf("Sleeping for %.2f seconds before trying next connection\n", c.config.ReconnectDelay.Seconds())
 		time.Sleep(c.config.ReconnectDelay)
 	}
 
@@ -247,10 +241,14 @@ func (c *ConnImpl) createSocketConnection(isRetryConnection bool, notifyOnConnec
 		dialer.Timeout = time.Second * time.Duration(c.config.ConnTimeout)
 	}
 
+	logReconnect := true
 	for {
 		conn, err := dialer.Dial("tcp", c.config.Url)
 		if err != nil && c.config.AutoRetry {
-			log.Printf("Failed to connect, will sleep for %.2f seconds before trying again : %v\n", c.config.ReconnectInterval.Seconds(), err)
+			if logReconnect {
+				log.Printf("Failed to connect, will sleep for %.2f seconds before trying again : %v\n", c.config.ReconnectInterval.Seconds(), err)
+				logReconnect = false
+			}
 			time.Sleep(c.config.ReconnectInterval)
 			continue
 		}
@@ -297,6 +295,7 @@ func (c *ConnImpl) onSocketConnection(notifyOnConnect bool) error {
 }
 
 func (c *ConnImpl) onDisconnect() {
+	log.Println("exited reader loop and disconnecting")
 	c.cleanupReader()
 	c.cleanupSocket()
 	if c.config.AutoRetry {
@@ -332,21 +331,39 @@ func (c *ConnImpl) registerChannel(cid ChannelId, ch chan ChannelMsg) {
 	c.dispatchLock.Unlock()
 }
 
-func (c *ConnImpl) unregisterChannel(cid ChannelId) chan ChannelMsg {
+func (c *ConnImpl) unregisterChannel(cid ChannelId) {
 	c.dispatchLock.Lock()
 	ret, ok := c.dispatch[cid]
 	if ok {
 		delete(c.dispatch, cid)
+		close(ret)
 	}
 	c.dispatchLock.Unlock()
-	return ret
 }
 
-func (c *ConnImpl) lookupChannel(cid ChannelId) chan ChannelMsg {
+func (c *ConnImpl) unregisterChannelAndSendMsg(cid ChannelId, msg ChannelMsg) {
+	c.dispatchLock.Lock()
+	ret, ok := c.dispatch[cid]
+	if ok {
+		delete(c.dispatch, cid)
+		ret <- msg
+		close(ret)
+	} else {
+		fmt.Println("Unknown channel: %v discarding message", cid)
+	}
+	c.dispatchLock.Unlock()
+}
+
+
+func (c *ConnImpl) lookupChannelAndSendMsg(cid ChannelId, msg ChannelMsg) {
 	c.dispatchLock.RLock()
-	ret := c.dispatch[cid]
+	ret, ok := c.dispatch[cid]
+	if ok {
+		ret <- msg
+	} else {
+		fmt.Println("Unknown channel: %v discarding message", cid)
+	}
 	c.dispatchLock.RUnlock()
-	return ret
 }
 
 func (c *ConnImpl) writeOnSocket(data []byte) error {
@@ -373,8 +390,11 @@ func (c *ConnImpl) reader() {
 	fszb := make([]byte, 4)
 	buff := make([]byte, 256)
 	defer func() {
-		log.Println("exiting reader loop")
-		c.onDisconnect()
+		if c.config.OnDisconnect != nil {
+			c.config.OnDisconnect(c.config.Verson)
+		} else {
+			c.onDisconnect()
+		}
 	}()
 
 	for {
@@ -406,7 +426,9 @@ func (c *ConnImpl) readFrame(fszb []byte, buff []byte) (error, *Buffer) {
 	num, err := io.ReadFull(c.socket, fszb)
 	if err != nil {
 		if err != io.EOF {
-			log.Println("Error reading frame size:", err)
+			if c.config.OnDisconnect == nil { // error expected for composite connection
+				log.Println("Error reading frame size:", err)
+			}
 		}
 		return err, nil
 	}
@@ -441,20 +463,9 @@ func (c *ConnImpl) dispatchMessage(m interface{}) {
 	switch msg := m.(type) {
 	case ChannelMsg:
 		if msg.IsClose {
-			ch := c.unregisterChannel(msg.Channel)
-			if ch != nil {
-				ch <- msg
-				close(ch)
-			} else {
-				log.Println("Unknown channel:", msg.Channel, "discarding message")
-			}
+			c.unregisterChannelAndSendMsg(msg.Channel, msg)
 		} else {
-			ch := c.lookupChannel(msg.Channel)
-			if ch != nil {
-				ch <- msg
-			} else {
-				log.Println("Unknown channel:", msg.Channel, "discarding message")
-			}
+			c.lookupChannelAndSendMsg(msg.Channel, msg)
 		}
 	case ChannelCreate:
 		fn, ok := c.services[msg.Service]
