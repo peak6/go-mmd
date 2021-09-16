@@ -392,7 +392,7 @@ func (c *ConnImpl) reader() {
 	buff := make([]byte, 256)
 	defer func() {
 		if c.config.OnDisconnect != nil {
-			c.config.OnDisconnect(c.config.Counter)
+			c.config.OnDisconnect(c.config.Verson)
 		} else {
 			c.onDisconnect()
 		}
