@@ -225,7 +225,6 @@ func (c *ConnImpl) close() error {
 
 	if c.socket != nil {
 		err := c.socket.Close()
-		c.socket = nil
 		return err
 	}
 
