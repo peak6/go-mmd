@@ -16,14 +16,14 @@ import (
 )
 
 type CompositeConn struct {
-	conns            map[string]*ConnImpl
-	mmdConn          *ConnImpl
-	cfg              *ConnConfig
-	mu               sync.RWMutex
-	callTimeout      time.Duration
-	servers          []*Server
-	stopCounter      *atomic.Int32
-	lastReconnect    time.Time
+	conns              map[string]*ConnImpl
+	mmdConn            *ConnImpl
+	cfg                *ConnConfig
+	mu                 sync.RWMutex
+	callTimeout        time.Duration
+	servers            []*Server
+	connVersionCounter *atomic.Int32
+	lastReconnect      time.Time
 }
 
 func (c *CompositeConn) Subscribe(service string, body interface{}) (*Chan, error) {
@@ -136,7 +136,7 @@ func (c *CompositeConn) registerDirectService(service string, fn ServiceFunc) er
 
 func (c *CompositeConn) createSocketConnection(isRetryConnection bool, notifyOnConnect bool) error {
 	c.mmdConn.config.OnDisconnect = c.onDisconnect
-	c.mmdConn.config.Counter = c.stopCounter.Load()
+	c.mmdConn.config.Verson = c.connVersionCounter.Load()
 	return c.mmdConn.createSocketConnection(isRetryConnection, notifyOnConnect)
 }
 
@@ -165,22 +165,30 @@ func (c *CompositeConn) close() (err error) {
 	return
 }
 
-func (c *CompositeConn) onDisconnect(connCounter int32) {
-	if c.stopCounter.CAS(connCounter, connCounter+1) {
+func (c *CompositeConn) onDisconnect(connVerson int32) {
+	/*
+	Close out all connections
+	Use counter to make sure it will only close and create new connection once when there are multiple connection drops
+	Doc Link: TODO
+	 */
+	if c.connVersionCounter.CAS(connVerson, connVerson+1) {
 		for {
-			if c.logReconnect() {
-				log.Println("closing and reconnecting composite connection")
-			}
 			c.close()
-			time.Sleep(c.cfg.ReconnectInterval)
+			if !c.cfg.AutoRetry {
+				log.Println("closing composite connection")
+				return
+			}
 
-			if c.cfg.AutoRetry {
-				err := c.createSocketConnection(true, true)
-				if err == nil || !c.stopCounter.CAS(connCounter+1, connCounter+2) {
-					// check counter to make sure there is no other process has already exited
-					// cannot assume reconnect succeed here since TCP dial always work with k8s service
-					return
-				}
+			if c.logReconnect() {
+				log.Println("reconnecting composite connection")
+			}
+
+			time.Sleep(c.cfg.ReconnectInterval)
+			err := c.createSocketConnection(true, true)
+			if err == nil || !c.connVersionCounter.CAS(connVerson+1, connVerson+2) {
+				// check counter to make sure there is no other process has already exited
+				// cannot assume reconnect succeed here since TCP dial always work with k8s service
+				return
 			}
 		}
 	}
@@ -249,7 +257,7 @@ func (c *CompositeConn) createAndInitDirectConnection(service string) (*ConnImpl
 
 	newConfig.ConnTimeout = DIRECT_CONNECTION_TIMEOUT_SECONDS
 	newConfig.OnDisconnect = c.onDisconnect
-	newConfig.Counter = c.mmdConn.config.Counter
+	newConfig.Verson = c.mmdConn.config.Verson
 
 	conn := createConnection(&newConfig)
 
