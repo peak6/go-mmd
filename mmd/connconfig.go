@@ -16,7 +16,7 @@ type ConnConfig struct {
 	Url               string
 	ReadSz            int
 	WriteSz           int
-	Verson            int32
+	Version           int32
 	AppName           string
 	AutoRetry         bool
 	ReconnectInterval time.Duration
