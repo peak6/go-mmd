@@ -173,6 +173,7 @@ func (c *CompositeConn) onDisconnect(connVerson int32) {
 	 */
 	if c.connVersionCounter.CAS(connVerson, connVerson+1) {
 		for {
+			connVerson += 1
 			c.close()
 			if !c.cfg.AutoRetry {
 				log.Println("closing composite connection")
@@ -185,7 +186,7 @@ func (c *CompositeConn) onDisconnect(connVerson int32) {
 
 			time.Sleep(c.cfg.ReconnectInterval)
 			err := c.createSocketConnection(true, true)
-			if err == nil || !c.connVersionCounter.CAS(connVerson+1, connVerson+2) {
+			if err == nil || !c.connVersionCounter.CAS(connVerson, connVerson+1) {
 				// check counter to make sure there is no other process has already exited
 				// cannot assume reconnect succeed here since TCP dial always work with k8s service
 				return
