@@ -165,15 +165,15 @@ func (c *CompositeConn) close() (err error) {
 	return
 }
 
-func (c *CompositeConn) onDisconnect(connVerson int32) {
+func (c *CompositeConn) onDisconnect(connVersion int32) {
 	/*
 	Close out all connections
 	Use counter to make sure it will only close and create new connection once when there are multiple connection drops
 	Doc Link: TODO
 	 */
-	if c.connVersionCounter.CAS(connVerson, connVerson+1) {
+	if c.connVersionCounter.CAS(connVersion, connVersion+1) {
 		for {
-			connVerson += 1
+			connVersion += 1
 			c.close()
 			if !c.cfg.AutoRetry {
 				log.Println("closing composite connection")
@@ -186,7 +186,7 @@ func (c *CompositeConn) onDisconnect(connVerson int32) {
 
 			time.Sleep(c.cfg.ReconnectInterval)
 			err := c.createSocketConnection(true, true)
-			if err == nil || !c.connVersionCounter.CAS(connVerson, connVerson+1) {
+			if err == nil || !c.connVersionCounter.CAS(connVersion, connVersion+1) {
 				// check counter to make sure there is no other process has already exited
 				// cannot assume reconnect succeed here since TCP dial always work with k8s service
 				return
