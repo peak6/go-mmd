@@ -349,7 +349,7 @@ func (c *ConnImpl) unregisterChannelAndSendMsg(cid ChannelId, msg ChannelMsg) {
 		ret <- msg
 		close(ret)
 	} else {
-		fmt.Println("Unknown channel: %v discarding message", cid)
+		fmt.Printf("Unknown channel: %v discarding message", cid)
 	}
 	c.dispatchLock.Unlock()
 }
@@ -361,7 +361,7 @@ func (c *ConnImpl) lookupChannelAndSendMsg(cid ChannelId, msg ChannelMsg) {
 	if ok {
 		ret <- msg
 	} else {
-		fmt.Println("Unknown channel: %v discarding message", cid)
+		fmt.Printf("Unknown channel: %v discarding message", cid)
 	}
 	c.dispatchLock.RUnlock()
 }
