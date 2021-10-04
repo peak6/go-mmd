@@ -289,7 +289,8 @@ func computeEnv() string {
 			}
 		}
 	}
-	return "dev"
+	panic("Environment can't be identified: a recognized environment was not specified via " +
+	"ENVIRONMENT env var; and HOSTNAME is not in a format which can be used to infer environment.")
 }
 
 var serviceToEnvVar = regexp.MustCompile("[.\\\\-]")
