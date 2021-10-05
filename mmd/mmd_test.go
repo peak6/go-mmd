@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"testing"
+	"log"
 )
 
 var integrationTests = false
