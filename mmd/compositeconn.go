@@ -249,6 +249,10 @@ func (c *CompositeConn) createConnection(service string, serviceType mmdAccessMe
 const DIRECT_CONNECTION_TIMEOUT_SECONDS = 5
 
 func (c *CompositeConn) createAndInitDirectConnection(service string) (*ConnImpl, error) {
+	if c.mmdConn.config.Version != c.connVersionCounter.Load() {
+		return nil, fmt.Errorf("not ready to accept new direct connection, still processing previous onDisconnect")	
+	}
+	
 	newConfig := *(c.cfg)
 	newUrl, err := getServiceUrl(service)
 	if err != nil {
