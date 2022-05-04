@@ -2,10 +2,12 @@ package mmd
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net"
+	"os"
 	"reflect"
 	"sync"
 	"time"
@@ -178,8 +180,8 @@ func ConnectWithTagsWithRetryTo(url string, myTags []string, theirTags []string,
 
 // internal to package --
 
-func (c *ConnImpl) startReader() {
-	go c.reader()
+func (c *ConnImpl) startReader(wg *sync.WaitGroup) {
+	go c.reader(wg)
 }
 
 func (c *ConnImpl) cleanupReader() {
@@ -281,7 +283,24 @@ func (c *ConnImpl) onSocketConnection(notifyOnConnect bool) error {
 		}
 	}
 
-	c.startReader()
+	// This is a convoluted way to ensure that Subscribe calls to this mmd client will return an error if the
+	// service is behind the Istio ingress, but is actually not healthy.
+	//
+	// We create a WaitGroup that the reader thread can signal when it is complete with its first pass of reading.
+	//
+	// This will ensure the TCP connection is good, because the Istio ingress will accept TCP connections
+	// for services that may not be available. Additionally, we cannot detect that the service is not there simply by
+	// Writing data to the socket due to the fact that  the network stack will return a successful Write call
+	// so long as the data makes it to the kernel's network buffer.
+	//
+	// If the reader detects an error, it will shutdown the socket, and will cause any subsequent Writes
+	// to fail as well. This gives the opportunity to return an Error from the Subscribe call.
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
+
+	c.startReader(wg)
+
+	wg.Wait()
 
 	if len(c.config.ExtraTheirTags) > 0 {
 		c.Call("$mmd", map[string]interface{}{"extraTheirTags": c.config.ExtraTheirTags})
@@ -386,7 +405,8 @@ func (c *ConnImpl) writeOnSocket(data []byte) error {
 	return nil
 }
 
-func (c *ConnImpl) reader() {
+func (c *ConnImpl) reader(wg *sync.WaitGroup) {
+	firstPass := true
 	fszb := make([]byte, 4)
 	buff := make([]byte, 256)
 	defer func() {
@@ -398,8 +418,35 @@ func (c *ConnImpl) reader() {
 	}()
 
 	for {
+		if firstPass {
+			// On the first pass of the reader we want to use the Read to check the state of the
+			// TCP connection, so we must set a ReadDeadline, otherwise the Read call will block until data is present.
+			// If the TCP connection is bad, the Read call will return an error other than ErrDeadlineExceeded,
+			// most likely an EOF
+			_ = c.socket.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+		}
 		err, b := c.readFrame(fszb, buff)
+		if firstPass {
+			// After the first pass of the Read, we reset the deadline to 0, which disables
+			// it, any subsequent Read calls on the TCP connection will block until data is
+			// available.
+			_ = c.socket.SetReadDeadline(time.Time{})
+			// We also signal the WaitGroup that we are done so the goroutine that is setting
+			// up this connection can finish its processing
+			wg.Done()
+			firstPass = false
+		}
 		if err != nil {
+			if errors.Is(err, os.ErrDeadlineExceeded) {
+				// We are expecting a DeadlineExceeded error on the first pass, so we just
+				// continue at the top of the for loop.
+				// This block of code should never run on subsequent iterations of
+				// the loop because we have disabled the deadline above.
+				continue
+			}
+			// Any other error received, regardless of first pass or not, indicates
+			// there is a problem with the TCP connection, and we should exit the reader loop.
+			// The deferred function will take care of the cleanup.
 			return
 		}
 		m, err := Decode(b)
@@ -426,7 +473,9 @@ func (c *ConnImpl) readFrame(fszb []byte, buff []byte) (error, *Buffer) {
 	num, err := io.ReadFull(c.socket, fszb)
 	if err != nil {
 		if err != io.EOF {
-			if c.config.OnDisconnect == nil { // error expected for composite connection
+			// error expected for composite connection or first read with a Deadline Exceeded,
+			// so no need to log this error.
+			if c.config.OnDisconnect == nil && !errors.Is(err, os.ErrDeadlineExceeded){
 				log.Println("Error reading frame size:", err)
 			}
 		}
