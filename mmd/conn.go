@@ -298,7 +298,7 @@ func (c *ConnImpl) onSocketConnection(notifyOnConnect bool) error {
 }
 
 func (c *ConnImpl) checkConnectionStateWithRead() error {
-	if err := c.socket.SetReadDeadline(time.Now().Add(1000 * time.Millisecond)); err != nil {
+	if err := c.socket.SetReadDeadline(time.Now().Add(500 * time.Millisecond)); err != nil {
 		return fmt.Errorf("failed to set read deadline, reason: %v", err)
 	}
 	err, _ := c.readSingleFrame()
