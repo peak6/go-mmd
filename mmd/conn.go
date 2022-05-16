@@ -2,10 +2,12 @@ package mmd
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net"
+	"os"
 	"reflect"
 	"sync"
 	"time"
@@ -270,13 +272,14 @@ func (c *ConnImpl) createSocketConnection(isRetryConnection bool, notifyOnConnec
 func (c *ConnImpl) onSocketConnection(notifyOnConnect bool) error {
 	//either write or read the handshake
 	if c.config.WriteHandshake {
-		err := c.handshake()
-		if err != nil {
+		if err := c.handshake(); err != nil {
+			return err
+		}
+		if err := c.checkConnectionStateWithRead(); err != nil {
 			return err
 		}
 	} else {
-		err, _ := c.readSingleFrame()
-		if err != nil {
+		if err, _ := c.readSingleFrame(); err != nil {
 			return err
 		}
 	}
@@ -291,6 +294,22 @@ func (c *ConnImpl) onSocketConnection(notifyOnConnect bool) error {
 		return c.config.OnConnect(c)
 	}
 
+	return nil
+}
+
+func (c *ConnImpl) checkConnectionStateWithRead() error {
+	if err := c.socket.SetReadDeadline(time.Now().Add(500 * time.Millisecond)); err != nil {
+		return fmt.Errorf("failed to set read deadline, reason: %v", err)
+	}
+	err, _ := c.readSingleFrame()
+	if err != nil {
+		if !errors.Is(err, os.ErrDeadlineExceeded) {
+			return err
+		}
+	}
+	if err := c.socket.SetReadDeadline(time.Time{}); err != nil {
+		return fmt.Errorf("failed to clear read deadline, reason: %v", err)
+	}
 	return nil
 }
 
@@ -426,7 +445,9 @@ func (c *ConnImpl) readFrame(fszb []byte, buff []byte) (error, *Buffer) {
 	num, err := io.ReadFull(c.socket, fszb)
 	if err != nil {
 		if err != io.EOF {
-			if c.config.OnDisconnect == nil { // error expected for composite connection
+			// error expected for composite connection or first read with a Deadline Exceeded,
+			// so no need to log this error.
+			if c.config.OnDisconnect == nil && !errors.Is(err, os.ErrDeadlineExceeded){
 				log.Println("Error reading frame size:", err)
 			}
 		}
