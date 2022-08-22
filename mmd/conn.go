@@ -362,72 +362,71 @@ func (c *ConnImpl) unregisterChannel(cid ChannelId) {
 	c.dispatchLock.Unlock()
 }
 
-func (c *ConnImpl) unregisterChannelAndSendMsgWithRetry(cid ChannelId, msg ChannelMsg) {
-	// for unregisterChannelAndSendMsgWithRetry we won't time out because it is preferable to attempt to unregister
+func (c *ConnImpl) unregisterChannelAndDispatchMsgWithRetry(cid ChannelId, msg ChannelMsg) {
+	// for unregisterChannelAndDispatchMsgWithRetry we won't time out because it is preferable to attempt to unregister
 	// the channel indefinitely as opposed to leaving a channel in a zombie state. this will resolve deadlock issues,
 	// as dispatchLock is released on each iteration
 	attempts := 0
 	for {
 		attempts += 1
-		if c.unregisterChannelAndSendMsg(cid, msg) {
-			if attempts % 100 == 0 {
-				log.Printf("could not unregister channel: %v after %d attempts", cid, attempts)
-			}
-			time.Sleep(SendChannelRetryInterval)
-			continue
+		if c.unregisterChannelAndDispatchMsg(cid, msg) {
+			return
 		}
-		return
+		if attempts % 100 == 0 {
+			log.Printf("could not unregister channel: %v after %d attempts", cid, attempts)
+		}
+		time.Sleep(SendChannelRetryInterval)
 	}
 }
 
-func (c *ConnImpl) lookupChannelAndSendMsgWithRetry(cid ChannelId, msg ChannelMsg) {
+func (c *ConnImpl) lookupChannelAndDispatchMsgWithRetry(cid ChannelId, msg ChannelMsg) {
 	attempts := 0
 	for {
 		attempts += 1
-		if c.lookupChannelAndSendMsg(cid, msg) {
-			if attempts < SendChannelMaxRetry {
-				time.Sleep(SendChannelRetryInterval)
-				continue
-			}
-			log.Printf("Could not send message: %v to channelId %v after 5 attempts, bailing out", msg, cid)
+		if c.lookupChannelAndDispatchMsg(cid, msg) {
+			return
 		}
-		return
+		if attempts >= SendChannelMaxRetry {
+			log.Printf("Could not send message: %v to channelId %v after 5 attempts, bailing out", msg, cid)
+			return
+		}
+		time.Sleep(SendChannelRetryInterval)
 	}
 }
 
-func (c *ConnImpl) unregisterChannelAndSendMsg(cid ChannelId, msg ChannelMsg) bool {
+func (c *ConnImpl) unregisterChannelAndDispatchMsg(cid ChannelId, msg ChannelMsg) bool {
 	c.dispatchLock.Lock()
 	defer c.dispatchLock.Unlock()
 	ret, ok := c.dispatch[cid]
 	if !ok {
 		log.Printf("Unknown channel: %v discarding message", cid)
-		return false
+		return true
 	}
 
 	select {
 	case ret <- msg:
 		delete(c.dispatch, cid)
 		close(ret)
-		return false
-	default:
 		return true
+	default:
+		return false
 	}
 }
 
-func (c *ConnImpl) lookupChannelAndSendMsg(cid ChannelId, msg ChannelMsg) bool {
+func (c *ConnImpl) lookupChannelAndDispatchMsg(cid ChannelId, msg ChannelMsg) bool {
 	c.dispatchLock.RLock()
 	defer c.dispatchLock.RUnlock()
 	ret, ok := c.dispatch[cid]
 	if !ok {
 		log.Printf("Unknown channel: %v discarding message", cid)
-		return false
+		return true
 	}
 
 	select {
 	case ret <- msg:
-		return false
-	default:
 		return true
+	default:
+		return false
 	}
 }
 
@@ -530,9 +529,9 @@ func (c *ConnImpl) dispatchMessage(m interface{}) {
 	switch msg := m.(type) {
 	case ChannelMsg:
 		if msg.IsClose {
-			c.unregisterChannelAndSendMsgWithRetry(msg.Channel, msg)
+			c.unregisterChannelAndDispatchMsgWithRetry(msg.Channel, msg)
 		} else {
-			c.lookupChannelAndSendMsgWithRetry(msg.Channel, msg)
+			c.lookupChannelAndDispatchMsgWithRetry(msg.Channel, msg)
 		}
 	case ChannelCreate:
 		fn, ok := c.services[msg.Service]
