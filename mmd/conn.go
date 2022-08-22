@@ -15,7 +15,7 @@ import (
 
 const DefaultRetryInterval = 5 * time.Second
 const SendChannelRetryInterval = 100 * time.Millisecond
-const SendChannelMaxRetry = 5
+const SendChannelMaxRetry = 1
 const LocalhostUrl = "localhost:9999"
 
 type OnConnection func(Conn) error
