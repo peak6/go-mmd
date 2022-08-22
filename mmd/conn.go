@@ -14,6 +14,8 @@ import (
 )
 
 const DefaultRetryInterval = 5 * time.Second
+const SendChannelRetryInterval = 100 * time.Millisecond
+const SendChannelMaxRetry = 5
 const LocalhostUrl = "localhost:9999"
 
 type OnConnection func(Conn) error
@@ -364,9 +366,14 @@ func (c *ConnImpl) unregisterChannelAndSendMsgWithRetry(cid ChannelId, msg Chann
 	// for unregisterChannelAndSendMsgWithRetry we won't time out because it is preferable to attempt to unregister
 	// the channel indefinitely as opposed to leaving a channel in a zombie state. this will resolve deadlock issues,
 	// as dispatchLock is released on each iteration
+	attempts := 0
 	for {
+		attempts += 1
 		if c.unregisterChannelAndSendMsg(cid, msg) {
-			time.Sleep(100 * time.Millisecond)
+			if attempts % 100 == 0 {
+				log.Printf("could not unregister channel: %v after %d attempts", cid, attempts)
+			}
+			time.Sleep(SendChannelRetryInterval)
 			continue
 		}
 		return
@@ -378,8 +385,8 @@ func (c *ConnImpl) lookupChannelAndSendMsgWithRetry(cid ChannelId, msg ChannelMs
 	for {
 		attempts += 1
 		if c.lookupChannelAndSendMsg(cid, msg) {
-			if attempts < 5 {
-				time.Sleep(100 * time.Millisecond)
+			if attempts < SendChannelMaxRetry {
+				time.Sleep(SendChannelRetryInterval)
 				continue
 			}
 			log.Printf("Could not send message: %v to channelId %v after 5 attempts, bailing out", msg, cid)
