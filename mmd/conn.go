@@ -49,7 +49,7 @@ type ConnImpl struct {
 }
 
 func (c *ConnImpl) Subscribe(service string, body interface{}) (*Chan, error) {
-	ch := make(chan ChannelMsg, 1)
+	ch := make(chan ChannelMsg, 5)
 	cc := NewChannelCreate(SubChan, service, body)
 	c.registerChannel(cc.ChannelId, ch)
 
