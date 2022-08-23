@@ -14,7 +14,7 @@ import (
 )
 
 const DefaultRetryInterval = 5 * time.Second
-const SendChannelRetryInterval = 100 * time.Millisecond
+const SendChannelRetryInterval = 1 * time.Second
 const SendChannelMaxRetry = 5
 const LocalhostUrl = "localhost:9999"
 
