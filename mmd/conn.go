@@ -373,7 +373,7 @@ func (c *ConnImpl) unregisterChannelAndDispatchMsgWithRetry(cid ChannelId, msg C
 			return
 		}
 		if attempts % 100 == 0 {
-			fmt.Println("could not unregister channel: %v after %d attempts", cid, attempts)
+			fmt.Printf("could not unregister channel: %v after %d attempts\n", cid, attempts)
 		}
 		time.Sleep(SendChannelRetryInterval)
 	}
@@ -387,7 +387,7 @@ func (c *ConnImpl) lookupChannelAndDispatchMsgWithRetry(cid ChannelId, msg Chann
 			return
 		}
 		if attempts >= SendChannelMaxRetry {
-			fmt.Println("Could not dispatch message: %v to channelId %v after 5 attempts, bailing out", msg, cid)
+			fmt.Printf("Could not dispatch message: %v to channelId %v after 5 attempts, bailing out\n", msg, cid)
 			return
 		}
 		time.Sleep(SendChannelRetryInterval)
