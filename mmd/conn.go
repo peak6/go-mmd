@@ -368,13 +368,13 @@ func (c *ConnImpl) unregisterChannelAndDispatchMsgWithRetry(cid ChannelId, msg C
 	// as dispatchLock is released on each iteration
 	attempts := 0
 	for {
-		attempts += 1
 		if c.unregisterChannelAndDispatchMsg(cid, msg) {
 			return
 		}
 		if attempts % 100 == 0 {
 			fmt.Printf("could not unregister channel: %v after %d attempts\n", cid, attempts)
 		}
+		attempts += 1
 		time.Sleep(SendChannelRetryInterval)
 	}
 }
