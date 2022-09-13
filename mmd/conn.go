@@ -465,7 +465,7 @@ func (c *ConnImpl) readFrame(fszb []byte, buff []byte) (error, *Buffer) {
 func (c *ConnImpl) dispatchMessage(m interface{}) {
 	defer func() {
 		if dispatchErr := recover(); dispatchErr != nil {
-			log.Println("recovered from panic while dispatching message. Details: %v", dispatchErr)
+			fmt.Println("recovered from panic while dispatching message. Details: ", dispatchErr)
 		}
 	}()
 	switch msg := m.(type) {
