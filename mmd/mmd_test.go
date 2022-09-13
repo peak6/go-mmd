@@ -84,6 +84,40 @@ func TestRegister(t *testing.T) {
 	t.Logf("Client received sub channel message response: %+v\nError: %v\n", resp, err)
 }
 
+func TestCloseChannelRecover(t *testing.T) {
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
+	if !integrationTests {
+		t.Skip("integration tests disabled")
+	}
+
+	mmdc, err := Connect()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeConnection(t, mmdc)
+
+	t.Log("Created mmd connection:", mmdc)
+
+	err = mmdc.RegisterService("test.service", func(conn Conn, channel *Chan, channelCreate *ChannelCreate) {
+		if channelCreate.Type == SubChan {
+			go func() {
+				wg.Wait()
+				next := <-channel.Ch
+			}()
+
+			err := channel.Send("sub response")
+			if err != nil {
+				t.Logf("Service error sending sub response: %s", err)
+			}
+		}
+	})
+
+	subChan, err := mmdc.Subscribe("test.service", "sub message")
+	close(subChan.Ch)
+	wg.Done()
+}
+
 func closeConnection(t *testing.T, mmdc Conn) {
 	t.Log("Shutting down MMD connection")
 	err := mmdc.close()
