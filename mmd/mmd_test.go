@@ -86,11 +86,12 @@ func TestRegister(t *testing.T) {
 }
 
 func TestCloseChannelRecover(t *testing.T) {
-	wg := &sync.WaitGroup{}
-	wg.Add(1)
 	if !integrationTests {
 		t.Skip("integration tests disabled")
 	}
+	
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
 
 	mmdc, err := Connect()
 	if err != nil {
