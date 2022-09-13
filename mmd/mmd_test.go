@@ -3,12 +3,13 @@
 package mmd
 
 import (
+	"log"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
 	"strconv"
+	"sync"
 	"testing"
-	"log"
 )
 
 var integrationTests = false
@@ -101,18 +102,14 @@ func TestCloseChannelRecover(t *testing.T) {
 
 	err = mmdc.RegisterService("test.service", func(conn Conn, channel *Chan, channelCreate *ChannelCreate) {
 		if channelCreate.Type == SubChan {
-			go func() {
-				wg.Wait()
-				next := <-channel.Ch
-			}()
-
+			wg.Wait()
 			err := channel.Send("sub response")
 			if err != nil {
 				t.Logf("Service error sending sub response: %s", err)
 			}
 		}
 	})
-
+	
 	subChan, err := mmdc.Subscribe("test.service", "sub message")
 	close(subChan.Ch)
 	wg.Done()
