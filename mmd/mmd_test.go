@@ -3,6 +3,7 @@
 package mmd
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	_ "net/http/pprof"
@@ -97,6 +98,11 @@ func TestCloseChannelRecover(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() {
+		if closeErr := recover(); closeErr != nil {
+			fmt.Println("Expected, recovered from panic on closeConnection")
+		}
+	} ()
 	defer closeConnection(t, mmdc)
 
 	t.Log("Created mmd connection:", mmdc)
