@@ -107,7 +107,7 @@ func (c *ConnImpl) GetDefaultCallTimeout() time.Duration {
 	return c.callTimeout
 }
 
-func (c ConnImpl) String() string {
+func (c *ConnImpl) String() string {
 	return fmt.Sprintf("ConnImpl{remote: %s, local: %s}", c.socket.RemoteAddr(), c.socket.LocalAddr())
 }
 
@@ -429,7 +429,7 @@ func (c *ConnImpl) readFrame(fszb []byte, buff []byte) (error, *Buffer) {
 		if err != io.EOF {
 			// error expected for composite connection or first read with a Deadline Exceeded,
 			// so no need to log this error.
-			if c.config.OnDisconnect == nil && !errors.Is(err, os.ErrDeadlineExceeded){
+			if c.config.OnDisconnect == nil && !errors.Is(err, os.ErrDeadlineExceeded) {
 				log.Println("Error reading frame size:", err)
 			}
 		}
