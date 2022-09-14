@@ -190,8 +190,18 @@ func (c *ConnImpl) cleanupReader() {
 	c.dispatchLock.Lock()
 	for k, v := range c.dispatch {
 		delete(c.dispatch, k)
-		close(v)
+		closeRecover(v)
 	}
+}
+
+func closeRecover(v chan ChannelMsg) {
+	defer func() {
+		err := recover()
+		if err != nil {
+			fmt.Printf("recovered from panic while trying to close channel: %v. Error: %v\n", v, err)
+		}
+	}()
+	close(v)
 }
 
 func (c *ConnImpl) cleanupSocket() {
