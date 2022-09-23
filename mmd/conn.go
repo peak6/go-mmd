@@ -14,8 +14,6 @@ import (
 )
 
 const DefaultRetryInterval = 5 * time.Second
-const SendChannelRetryInterval = 1 * time.Second
-const SendChannelMaxRetry = 5
 const LocalhostUrl = "localhost:9999"
 
 type OnConnection func(Conn) error
@@ -49,7 +47,7 @@ type ConnImpl struct {
 }
 
 func (c *ConnImpl) Subscribe(service string, body interface{}) (*Chan, error) {
-	ch := make(chan ChannelMsg, 5)
+	ch := make(chan ChannelMsg, 1)
 	cc := NewChannelCreate(SubChan, service, body)
 	c.registerChannel(cc.ChannelId, ch)
 
@@ -109,7 +107,7 @@ func (c *ConnImpl) GetDefaultCallTimeout() time.Duration {
 	return c.callTimeout
 }
 
-func (c ConnImpl) String() string {
+func (c *ConnImpl) String() string {
 	return fmt.Sprintf("ConnImpl{remote: %s, local: %s}", c.socket.RemoteAddr(), c.socket.LocalAddr())
 }
 
@@ -192,8 +190,18 @@ func (c *ConnImpl) cleanupReader() {
 	c.dispatchLock.Lock()
 	for k, v := range c.dispatch {
 		delete(c.dispatch, k)
-		close(v)
+		closeRecover(v)
 	}
+}
+
+func closeRecover(v chan ChannelMsg) {
+	defer func() {
+		err := recover()
+		if err != nil {
+			fmt.Printf("recovered from panic while trying to close channel: %v. Error: %v\n", v, err)
+		}
+	}()
+	close(v)
 }
 
 func (c *ConnImpl) cleanupSocket() {
@@ -352,82 +360,21 @@ func (c *ConnImpl) registerChannel(cid ChannelId, ch chan ChannelMsg) {
 	c.dispatchLock.Unlock()
 }
 
-func (c *ConnImpl) unregisterChannel(cid ChannelId) {
+func (c *ConnImpl) unregisterChannel(cid ChannelId) chan ChannelMsg {
 	c.dispatchLock.Lock()
 	ret, ok := c.dispatch[cid]
 	if ok {
 		delete(c.dispatch, cid)
-		close(ret)
 	}
 	c.dispatchLock.Unlock()
+	return ret
 }
 
-func (c *ConnImpl) unregisterChannelAndDispatchMsgWithRetry(cid ChannelId, msg ChannelMsg) {
-	// for unregisterChannelAndDispatchMsgWithRetry we won't time out because it is preferable to attempt to unregister
-	// the channel indefinitely as opposed to leaving a channel in a zombie state. this will resolve deadlock issues,
-	// as dispatchLock is released on each iteration
-	attempts := 0
-	for {
-		if c.unregisterChannelAndDispatchMsg(cid, msg) {
-			return
-		}
-		if attempts % 100 == 0 {
-			fmt.Printf("could not unregister channel: %v after %d attempts\n", cid, attempts)
-		}
-		attempts += 1
-		time.Sleep(SendChannelRetryInterval)
-	}
-}
-
-func (c *ConnImpl) lookupChannelAndDispatchMsgWithRetry(cid ChannelId, msg ChannelMsg) {
-	attempts := 0
-	for {
-		attempts += 1
-		if c.lookupChannelAndDispatchMsg(cid, msg) {
-			return
-		}
-		if attempts >= SendChannelMaxRetry {
-			fmt.Printf("Could not dispatch message: %v to channelId %v after 5 attempts, bailing out\n", msg, cid)
-			return
-		}
-		time.Sleep(SendChannelRetryInterval)
-	}
-}
-
-func (c *ConnImpl) unregisterChannelAndDispatchMsg(cid ChannelId, msg ChannelMsg) bool {
-	c.dispatchLock.Lock()
-	defer c.dispatchLock.Unlock()
-	ret, ok := c.dispatch[cid]
-	if !ok {
-		log.Printf("Unknown channel: %v discarding message", cid)
-		return true
-	}
-
-	select {
-	case ret <- msg:
-		delete(c.dispatch, cid)
-		close(ret)
-		return true
-	default:
-		return false
-	}
-}
-
-func (c *ConnImpl) lookupChannelAndDispatchMsg(cid ChannelId, msg ChannelMsg) bool {
+func (c *ConnImpl) lookupChannel(cid ChannelId) chan ChannelMsg {
 	c.dispatchLock.RLock()
-	defer c.dispatchLock.RUnlock()
-	ret, ok := c.dispatch[cid]
-	if !ok {
-		log.Printf("Unknown channel: %v discarding message", cid)
-		return true
-	}
-
-	select {
-	case ret <- msg:
-		return true
-	default:
-		return false
-	}
+	ret := c.dispatch[cid]
+	c.dispatchLock.RUnlock()
+	return ret
 }
 
 func (c *ConnImpl) writeOnSocket(data []byte) error {
@@ -492,7 +439,7 @@ func (c *ConnImpl) readFrame(fszb []byte, buff []byte) (error, *Buffer) {
 		if err != io.EOF {
 			// error expected for composite connection or first read with a Deadline Exceeded,
 			// so no need to log this error.
-			if c.config.OnDisconnect == nil && !errors.Is(err, os.ErrDeadlineExceeded){
+			if c.config.OnDisconnect == nil && !errors.Is(err, os.ErrDeadlineExceeded) {
 				log.Println("Error reading frame size:", err)
 			}
 		}
@@ -526,12 +473,28 @@ func (c *ConnImpl) readFrame(fszb []byte, buff []byte) (error, *Buffer) {
 }
 
 func (c *ConnImpl) dispatchMessage(m interface{}) {
+	defer func() {
+		if dispatchErr := recover(); dispatchErr != nil {
+			fmt.Println("recovered from panic while dispatching message. Details: ", dispatchErr)
+		}
+	}()
 	switch msg := m.(type) {
 	case ChannelMsg:
 		if msg.IsClose {
-			c.unregisterChannelAndDispatchMsgWithRetry(msg.Channel, msg)
+			ch := c.unregisterChannel(msg.Channel)
+			if ch != nil {
+				ch <- msg
+				close(ch)
+			} else {
+				log.Println("Unknown channel:", msg.Channel, "discarding message")
+			}
 		} else {
-			c.lookupChannelAndDispatchMsgWithRetry(msg.Channel, msg)
+			ch := c.lookupChannel(msg.Channel)
+			if ch != nil {
+				ch <- msg
+			} else {
+				log.Println("Unknown channel:", msg.Channel, "discarding message")
+			}
 		}
 	case ChannelCreate:
 		fn, ok := c.services[msg.Service]
