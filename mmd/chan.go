@@ -29,7 +29,7 @@ func (c *Chan) NextMessage() (ChannelMsg, error) {
 func (c *Chan) Close(body interface{}) error {
 	cm := ChannelMsg{Channel: c.Id, Body: body, IsClose: true}
 	if ch := c.con.unregisterChannel(c.Id); ch != nil {
-		close(ch)
+		closeRecover(ch)
 	}
 
 	buff := NewBuffer(1024)
