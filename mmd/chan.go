@@ -15,8 +15,8 @@ type Chan struct {
 	Id  ChannelId
 }
 
-// EOC Signals close of MMD channel
-var EOC = errors.New("End Of Channel")
+// EOC signals close of MMD channel
+var EOC = errors.New("end of channel")
 
 func (c *Chan) NextMessage() (ChannelMsg, error) {
 	a, ok := <-c.Ch
@@ -37,7 +37,7 @@ func (c *Chan) Close(body interface{}) error {
 	if err != nil {
 		return err
 	}
-	c.con.writeOnSocket(buff.Flip().Bytes())
+	_ = c.con.writeOnSocket(buff.Flip().Bytes())
 	return nil
 }
 
@@ -48,7 +48,7 @@ func (c *Chan) Send(body interface{}) error {
 	if err != nil {
 		return err
 	}
-	c.con.writeOnSocket(buff.Flip().Bytes())
+	_ = c.con.writeOnSocket(buff.Flip().Bytes())
 	return nil
 }
 

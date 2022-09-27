@@ -35,7 +35,7 @@ type Conn interface {
 	close() error
 }
 
-// ConnImpl Connection and channel dispatch map
+// ConnImpl contains the socket connection and channel dispatch map
 type ConnImpl struct {
 	socket       *net.TCPConn
 	dispatch     map[ChannelId]chan ChannelMsg
@@ -62,7 +62,7 @@ func (c *ConnImpl) Unsubscribe(cid ChannelId, body interface{}) error {
 	if ch := c.unregisterChannel(cid); ch != nil {
 		closeRecover(ch)
 	} else {
-		return fmt.Errorf("Failed close channel: %v", cid)
+		return fmt.Errorf("failed close channel: %v", cid)
 	}
 
 	return c.sendChannelMsg(NewChannelClose(cid, body))
@@ -95,7 +95,7 @@ func (c *ConnImpl) CallAuthenticated(service string, token AuthToken, body inter
 	select {
 	case ret, ok := <-ch:
 		if !ok {
-			return nil, fmt.Errorf("Call Error: channel closed while waiting for return message")
+			return nil, fmt.Errorf("call Error: channel closed while waiting for return message")
 		}
 
 		e, ok := ret.Body.(MMDError)
@@ -105,7 +105,7 @@ func (c *ConnImpl) CallAuthenticated(service string, token AuthToken, body inter
 
 		return ret.Body, nil
 	case <-time.After(c.callTimeout):
-		return nil, fmt.Errorf("Timeout waiting for: %s", service)
+		return nil, fmt.Errorf("timeout waiting for: %s", service)
 	}
 }
 
@@ -129,7 +129,7 @@ func (c *ConnImpl) RegisterService(name string, fn ServiceFunc) error {
 	return c.registerServiceUtil(name, fn, "register")
 }
 
-// default to local connection to call a service
+// Call connects to the default local MMD and executes a call to service
 func Call(service string, body interface{}) (interface{}, error) {
 	lc, err := LocalConnect()
 	if err != nil {
@@ -138,7 +138,7 @@ func Call(service string, body interface{}) (interface{}, error) {
 	return lc.Call(service, body)
 }
 
-// Creates a default URL connection (-mmd to override)
+// Connect creates a default URL connection (-mmd to override)
 func Connect() (Conn, error) {
 	return ConnectTo(mmdUrl)
 }
@@ -196,7 +196,7 @@ func (c *ConnImpl) startReader() {
 
 func (c *ConnImpl) cleanupReader() {
 	defer c.dispatchLock.Unlock()
-	c.socket.CloseRead()
+	_ = c.socket.CloseRead()
 	c.dispatchLock.Lock()
 	for k, v := range c.dispatch {
 		delete(c.dispatch, k)
@@ -215,7 +215,7 @@ func closeRecover(v chan ChannelMsg) {
 }
 
 func (c *ConnImpl) cleanupSocket() {
-	c.socket.CloseWrite()
+	_ = c.socket.CloseWrite()
 }
 
 func (c *ConnImpl) sendChannelMsg(cc interface{}) error {
@@ -278,8 +278,8 @@ func (c *ConnImpl) createSocketConnection(isRetryConnection bool, notifyOnConnec
 		if err == nil {
 			tcpConn := conn.(*net.TCPConn)
 
-			tcpConn.SetWriteBuffer(c.config.WriteSz)
-			tcpConn.SetReadBuffer(c.config.ReadSz)
+			_ = tcpConn.SetWriteBuffer(c.config.WriteSz)
+			_ = tcpConn.SetReadBuffer(c.config.ReadSz)
 			c.socket = tcpConn
 
 			return c.onSocketConnection(notifyOnConnect)
@@ -307,7 +307,7 @@ func (c *ConnImpl) onSocketConnection(notifyOnConnect bool) error {
 	c.startReader()
 
 	if len(c.config.ExtraTheirTags) > 0 {
-		c.Call("$mmd", map[string]interface{}{"extraTheirTags": c.config.ExtraTheirTags})
+		_, _ = c.Call("$mmd", map[string]interface{}{"extraTheirTags": c.config.ExtraTheirTags})
 	}
 
 	if c.config.OnConnect != nil && notifyOnConnect {
@@ -356,7 +356,7 @@ func (c *ConnImpl) registerServiceUtil(name string, fn ServiceFunc, registryActi
 		"tag":    c.config.ExtraMyTags,
 	})
 	if err == nil && ok != "ok" {
-		err = fmt.Errorf("Unexpected return: %v", ok)
+		err = fmt.Errorf("unexpected return: %v", ok)
 	}
 	if err != nil {
 		delete(c.services, name)
@@ -396,11 +396,11 @@ func (c *ConnImpl) writeOnSocket(data []byte) error {
 
 	_, err := c.socket.Write(fsz)
 	if err != nil {
-		return fmt.Errorf("Failed to write header: %s %s", fsz, err)
+		return fmt.Errorf("failed to write header: %s %s", fsz, err)
 	} else {
 		_, err = c.socket.Write(data)
 		if err != nil {
-			return fmt.Errorf("Failed to write data: %s", err)
+			return fmt.Errorf("failed to write data: %s", err)
 		}
 	}
 
@@ -457,7 +457,7 @@ func (c *ConnImpl) readFrame(fszb []byte, buff []byte) (error, *Buffer) {
 	}
 	if num != 4 {
 		log.Println("Short read for size:", num)
-		return fmt.Errorf("Short read for size: %d", num), nil
+		return fmt.Errorf("short read for size: %d", num), nil
 	}
 	fsz := int(binary.BigEndian.Uint32(fszb))
 	if len(buff) < fsz {
