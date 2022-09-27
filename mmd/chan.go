@@ -28,7 +28,10 @@ func (c *Chan) NextMessage() (ChannelMsg, error) {
 
 func (c *Chan) Close(body interface{}) error {
 	cm := ChannelMsg{Channel: c.Id, Body: body, IsClose: true}
-	c.con.unregisterChannel(c.Id)
+	if ch := c.con.unregisterChannel(c.Id); ch != nil {
+		close(ch)
+	}
+
 	buff := NewBuffer(1024)
 	err := Encode(buff, cm)
 	if err != nil {

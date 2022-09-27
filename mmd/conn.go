@@ -59,7 +59,12 @@ func (c *ConnImpl) Subscribe(service string, body interface{}) (*Chan, error) {
 }
 
 func (c *ConnImpl) Unsubscribe(cid ChannelId, body interface{}) error {
-	c.unregisterChannel(cid)
+	if ch := c.unregisterChannel(cid); ch != nil {
+		close(ch)
+	} else {
+		return fmt.Errorf("Failed close channel: %v", cid)
+	}
+
 	return c.sendChannelMsg(NewChannelClose(cid, body))
 }
 
@@ -77,7 +82,12 @@ func (c *ConnImpl) CallAuthenticated(service string, token AuthToken, body inter
 	}
 	ch := make(chan ChannelMsg, 1)
 	c.registerChannel(cc.ChannelId, ch)
-	defer c.unregisterChannel(cc.ChannelId)
+	defer func() {
+		ch := c.unregisterChannel(cc.ChannelId)
+		if ch != nil {
+			close(ch)
+		}
+	}()
 	err = c.writeOnSocket(buff.Flip().Bytes())
 	if err != nil {
 		return nil, err
