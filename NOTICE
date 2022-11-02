@@ -1,0 +1,11 @@
+Go-mmd
+A golang driver for the mmd protocol.
+Copyright 2022 PEAK6 INVESTMENTS LLC 
+
+This software requires Erlang 17, used under the Erlang Public License
+https://www.erlang.org/EPLICENSE
+
+This software uses mmd-core , used under the Apache 2.0 License
+https://github.com/peak6/mmd_core
+
+As part of the ongoing consolidation of Peak6 Investments LLC, The Initial Developer of this Software, all Peak6 involvement with the public version of this software will cease no later than 12/31/2022 . The open source project and source code will remain available for anyone who wants to build go-mmd personally, under the proximate Apache 2.0 License.
